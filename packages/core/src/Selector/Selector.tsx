@@ -254,7 +254,7 @@ const styles = stylex.create({
     backgroundColor: 'transparent',
     border: 'none',
     cursor: 'pointer',
-    textAlign: 'left',
+    textAlign: 'start',
     outline: 'none',
   },
   itemContent: {
