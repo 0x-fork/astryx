@@ -665,7 +665,20 @@ export function DateInput({
           styles.iconButton,
           isEffectivelyDisabled && styles.iconButtonDisabled,
         )}>
-        <Icon icon="calendar" size="sm" color="secondary" />
+        <Icon
+          icon="calendar"
+          size="sm"
+          color="secondary"
+          // Stable theme target on the toggle glyph itself, so a theme can
+          // restyle just this icon (color, size, hover) — and each open/closed
+          // state — via `defineTheme`. Same-element rules in @layer astryx-theme
+          // win over the icon's own base color/size, which a button-level target
+          // could not reach. Reflects the popover's open/closed state as a
+          // `data-state` attribute.
+          {...themeProps('date-input-toggle-icon', {
+            state: popover.isOpen ? 'expanded' : 'collapsed',
+          })}
+        />
       </button>
       <input
         ref={mergeRefs(ref, inputRef)}
@@ -717,7 +730,16 @@ export function DateInput({
           onClick={handleClear}
           aria-label={t('@astryx.dateInput.clear', {label})}
           {...stylex.props(styles.iconButton)}>
-          <Icon icon="close" size="sm" color="secondary" />
+          <Icon
+            icon="close"
+            size="sm"
+            color="secondary"
+            // Stable theme target on the clear glyph itself, so a theme can
+            // restyle just this icon (color, size, hover) via `defineTheme`.
+            // Same-element rules in @layer astryx-theme win over the icon's own
+            // base color/size, which a button-level target could not reach.
+            {...themeProps('date-input-clear-icon')}
+          />
         </button>
       )}
       {isBusy && <Spinner size="sm" />}
