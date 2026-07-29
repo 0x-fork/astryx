@@ -24,7 +24,16 @@
  * dependencies — install them to use this component.
  */
 
-import {useEffect, useId, useMemo, useRef, type ReactNode} from 'react';
+import {
+  useEffect,
+  useId,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  forwardRef,
+  type ReactNode,
+  type Ref,
+} from 'react';
 import * as stylex from '@stylexjs/stylex';
 import {
   colorVars,
@@ -72,6 +81,40 @@ import type {
   LexicalNode,
   EditorThemeClasses,
 } from 'lexical';
+
+/**
+ * Serialized state for an empty editor: a root containing a single empty
+ * paragraph. Used by the imperative `clear()` handle.
+ *
+ * We deliberately reset the editor via `editor.setEditorState(...)` rather than
+ * an `editor.update(() => { $getRoot()... })` callback, because `$getRoot` /
+ * `$createParagraphNode` are *runtime value* imports from the top-level
+ * `lexical` package. In the sandbox's Next build a top-level `lexical` value
+ * import forces Babel to transpile lexical's raw `src/*.ts` (which uses
+ * `declare` class fields) and fails the build. `parseEditorState` /
+ * `setEditorState` are methods on the editor instance, so no top-level
+ * `lexical` value import is needed. Setting a fresh state still notifies update
+ * listeners, so `onChange` fires.
+ */
+const EMPTY_EDITOR_STATE_JSON = JSON.stringify({
+  root: {
+    children: [
+      {
+        children: [],
+        direction: null,
+        format: '',
+        indent: 0,
+        type: 'paragraph',
+        version: 1,
+      },
+    ],
+    direction: null,
+    format: '',
+    indent: 0,
+    type: 'root',
+    version: 1,
+  },
+});
 
 const styles = stylex.create({
   wrapper: {
@@ -145,6 +188,30 @@ export interface RichTextEditorStatus {
   type: RichTextEditorStatusType;
   /** Optional message to display below the editor. */
   message?: string;
+}
+
+/**
+ * Imperative handle exposed via `ref`. Lets callers focus, clear, and read the
+ * editor without wiring a custom plugin. Available after mount.
+ */
+export interface RichTextEditorRef {
+  /**
+   * Move focus into the editor's editable surface. No-op when the editor is
+   * read-only or disabled.
+   */
+  focus: () => void;
+  /**
+   * Remove all content, resetting the editor to a single empty paragraph.
+   * No-op when the editor is read-only or disabled.
+   */
+  clear: () => void;
+  /** Read the current `EditorState`. Serialize with `.toJSON()` to persist. */
+  getEditorState: () => EditorState;
+  /**
+   * Access the underlying `LexicalEditor` instance for advanced use cases
+   * (custom commands, listeners, node transforms).
+   */
+  getEditor: () => LexicalEditor;
 }
 
 export interface RichTextEditorProps extends Omit<
@@ -269,40 +336,50 @@ export interface RichTextEditorProps extends Omit<
  *
  * @example
  * ```
- * import {RichTextEditor} from '@astryxdesign/lab';
+ * import {RichTextEditor, type RichTextEditorRef} from '@astryxdesign/lab';
+ *
+ * const ref = useRef<RichTextEditorRef>(null);
  * <RichTextEditor
+ *   ref={ref}
  *   label="Notes"
  *   placeholder="Write something..."
  *   onChange={state => save(JSON.stringify(state.toJSON()))}
  * />
+ * // Later: ref.current?.focus(); ref.current?.clear();
  * ```
  */
-export function RichTextEditor({
-  label,
-  isLabelHidden = false,
-  description,
-  isOptional = false,
-  isRequired = false,
-  defaultValue,
-  onChange,
-  placeholder,
-  isReadOnly = false,
-  isDisabled = false,
-  status,
-  width,
-  labelTooltip,
-  size: sizeProp,
-  nodes,
-  plugins,
-  hasMarkdownShortcuts = true,
-  transformers = TRANSFORMERS,
-  hasAutoFocus = false,
-  namespace = 'astryx-editor',
-  xstyle,
-  className,
-  style,
-  ...rest
-}: RichTextEditorProps) {
+export const RichTextEditor = forwardRef<
+  RichTextEditorRef,
+  RichTextEditorProps
+>(function RichTextEditor(
+  {
+    label,
+    isLabelHidden = false,
+    description,
+    isOptional = false,
+    isRequired = false,
+    defaultValue,
+    onChange,
+    placeholder,
+    isReadOnly = false,
+    isDisabled = false,
+    status,
+    width,
+    labelTooltip,
+    size: sizeProp,
+    nodes,
+    plugins,
+    hasMarkdownShortcuts = true,
+    transformers = TRANSFORMERS,
+    hasAutoFocus = false,
+    namespace = 'astryx-editor',
+    xstyle,
+    className,
+    style,
+    ...rest
+  }: RichTextEditorProps,
+  ref: Ref<RichTextEditorRef>,
+) {
   const size = useSize(sizeProp, 'md');
   const id = useId();
   const descriptionID = useId();
@@ -417,12 +494,13 @@ export function RichTextEditor({
               />
             )}
             {plugins}
+            <EditorRefBridge editorRef={ref} editable={editable} />
           </div>
         </LexicalComposer>
       </div>
     </Field>
   );
-}
+});
 
 RichTextEditor.displayName = 'RichTextEditor';
 
@@ -435,6 +513,50 @@ function AutoFocusOnMount(): null {
   useEffect(() => {
     editor.focus();
   }, [editor]);
+  return null;
+}
+
+/**
+ * Wires the imperative `RichTextEditorRef` handle. Split into its own plugin so
+ * it runs inside the composer context and can reach the `LexicalEditor` via
+ * `useLexicalComposerContext()`. Renders nothing.
+ *
+ * `focus()` and `clear()` are gated on `editable` so a read-only or disabled
+ * editor cannot be mutated or focused through the imperative handle — matching
+ * the behaviour of the editable surface itself.
+ */
+function EditorRefBridge({
+  editorRef,
+  editable,
+}: {
+  editorRef: Ref<RichTextEditorRef>;
+  editable: boolean;
+}): null {
+  const [editor] = useLexicalComposerContext();
+  useImperativeHandle(
+    editorRef,
+    () => ({
+      focus: () => {
+        if (!editable) {
+          return;
+        }
+        editor.focus();
+      },
+      clear: () => {
+        if (!editable) {
+          return;
+        }
+        // Reset to a single empty paragraph via a fresh EditorState. Uses the
+        // editor instance's own parse/set methods so we avoid a top-level
+        // `lexical` value import (see EMPTY_EDITOR_STATE_JSON). This still
+        // notifies update listeners, so `onChange` fires.
+        editor.setEditorState(editor.parseEditorState(EMPTY_EDITOR_STATE_JSON));
+      },
+      getEditorState: () => editor.getEditorState(),
+      getEditor: () => editor,
+    }),
+    [editor, editable],
+  );
   return null;
 }
 
