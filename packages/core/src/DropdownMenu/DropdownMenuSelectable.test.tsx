@@ -110,7 +110,7 @@ describe('DropdownMenuRadioGroup / RadioItem', () => {
         <DropdownMenuRadioGroup
           value="newest"
           onChange={() => {}}
-          aria-label="Sort by">
+          label="Sort by">
           <DropdownMenuRadioItem value="newest" label="Newest" />
           <DropdownMenuRadioItem value="oldest" label="Oldest" />
         </DropdownMenuRadioGroup>
@@ -136,7 +136,7 @@ describe('DropdownMenuRadioGroup / RadioItem', () => {
         <DropdownMenuRadioGroup
           value="newest"
           onChange={onChange}
-          aria-label="Sort by">
+          label="Sort by">
           <DropdownMenuRadioItem value="newest" label="Newest" />
           <DropdownMenuRadioItem value="oldest" label="Oldest" />
         </DropdownMenuRadioGroup>
@@ -147,6 +147,24 @@ describe('DropdownMenuRadioGroup / RadioItem', () => {
       screen.getByRole('menuitemradio', {name: 'Oldest', hidden: true}),
     );
     expect(onChange).toHaveBeenCalledWith('oldest');
+  });
+
+  it('names the group from the required label prop', async () => {
+    const user = userEvent.setup();
+    render(
+      <DropdownMenu button={{label: 'Sort'}}>
+        <DropdownMenuRadioGroup
+          value="newest"
+          onChange={() => {}}
+          label="Sort by">
+          <DropdownMenuRadioItem value="newest" label="Newest" />
+        </DropdownMenuRadioGroup>
+      </DropdownMenu>,
+    );
+    await user.click(screen.getByRole('button', {name: /Sort/}));
+    expect(
+      screen.getByRole('group', {name: 'Sort by', hidden: true}),
+    ).toBeInTheDocument();
   });
 
   it('throws when a radio item is used outside a group', () => {
