@@ -394,6 +394,58 @@ describe('Slider', () => {
     expect(handleChangeEnd).toHaveBeenCalledWith(55);
   });
 
+  // --- Fractional step precision ---
+
+  it('emits exact decimal values for fractional steps on keyboard', async () => {
+    const user = userEvent.setup();
+    const handleChange = vi.fn();
+    const handleChangeEnd = vi.fn();
+    render(
+      <Slider
+        label="Opacity"
+        value={0.2}
+        min={0}
+        max={1}
+        step={0.1}
+        onChange={handleChange}
+        onChangeEnd={handleChangeEnd}
+      />,
+    );
+    const slider = screen.getByRole('slider');
+    act(() => {
+      slider.focus();
+    });
+    await user.keyboard('{ArrowRight}');
+    // 0.2 + 0.1 must not surface binary float error (0.30000000000000004)
+    expect(handleChange).toHaveBeenCalledWith(0.3);
+    expect(handleChangeEnd).toHaveBeenCalledWith(0.3);
+  });
+
+  it('emits exact decimal values for fractional steps in range mode', async () => {
+    const user = userEvent.setup();
+    const handleChange = vi.fn();
+    const handleChangeEnd = vi.fn();
+    render(
+      <Slider
+        label="Range"
+        value={[0.2, 0.6] as [number, number]}
+        min={0}
+        max={1}
+        step={0.1}
+        onChange={handleChange}
+        onChangeEnd={handleChangeEnd}
+      />,
+    );
+    const sliders = screen.getAllByRole('slider');
+    act(() => {
+      sliders[1].focus();
+    });
+    await user.keyboard('{ArrowRight}');
+    // 0.6 + 0.1 snaps to 7 * 0.1, which is 0.7000000000000001 without rounding
+    expect(handleChange).toHaveBeenCalledWith([0.2, 0.7]);
+    expect(handleChangeEnd).toHaveBeenCalledWith([0.2, 0.7]);
+  });
+
   it('fires onChangeEnd on keyboard Home/End with correct value', async () => {
     const user = userEvent.setup();
     const handleChangeEnd = vi.fn();
