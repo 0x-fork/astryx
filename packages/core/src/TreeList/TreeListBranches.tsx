@@ -26,8 +26,10 @@ const LINE_WIDTH = 1;
  */
 const BRANCH_MARGIN = `calc(${spacingVars['--spacing-2']} + ${spacingVars['--spacing-0-5']})`;
 
-/** Per-level indent width, matching --spacing-4 (16px). */
-const LEVEL_INDENT = spacingVars['--spacing-4'];
+/** Per-level indent width. Reads the public, themeable `--tree-list-indent`
+ * lever set on the tree-list root (default `--spacing-4`, 16px), so the guide
+ * lines stay aligned with the row indent when a theme retunes the step. */
+const LEVEL_INDENT = 'var(--tree-list-indent)';
 
 const styles = stylex.create({
   container: {
