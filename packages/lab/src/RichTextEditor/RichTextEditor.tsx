@@ -30,6 +30,7 @@ import {
   useImperativeHandle,
   useMemo,
   useRef,
+  useState,
   forwardRef,
   type ReactNode,
   type Ref,
@@ -50,6 +51,7 @@ import {
   inputStatusFocusWithinStyles,
 } from '@astryxdesign/core/Field';
 import type {BaseProps} from '@astryxdesign/core';
+import {VisuallyHidden} from '@astryxdesign/core/VisuallyHidden';
 import type {SizeValue} from '@astryxdesign/core/utils';
 import {useSize} from '@astryxdesign/core/SizeContext';
 import {themeProps} from '@astryxdesign/core/utils';
@@ -157,6 +159,17 @@ const styles = stylex.create({
   disabled: {
     cursor: 'not-allowed',
   },
+  counter: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    marginTop: spacingVars['--spacing-1'],
+    fontFamily: typographyVars['--font-family-body'],
+    fontSize: typeScaleVars['--text-supporting-size'],
+    color: colorVars['--color-text-secondary'],
+  },
+  counterError: {
+    color: colorVars['--color-error'],
+  },
 });
 
 const sizeStyles = stylex.create({
@@ -178,6 +191,12 @@ const DEFAULT_NODES: ReadonlyArray<Klass<LexicalNode>> = [
   CodeNode,
   CodeHighlightNode,
 ];
+
+/**
+ * Fraction of `maxLength` at which the character counter begins announcing
+ * remaining/over-limit characters to screen readers. Matches TextArea.
+ */
+const COUNTER_WARNING_THRESHOLD = 0.8;
 
 export type RichTextEditorStatusType = 'warning' | 'error' | 'success';
 
@@ -318,6 +337,14 @@ export interface RichTextEditorProps extends Omit<
   /** Whether to automatically focus the editor on mount. @default false */
   hasAutoFocus?: boolean;
   /**
+   * Maximum number of characters. When set, a character counter
+   * (current/max) is displayed below the editor. Like TextArea, this does
+   * NOT enforce the limit natively — the counter shows error styling when the
+   * plain-text length exceeds the limit. Count is the editor's plain-text
+   * content length.
+   */
+  maxLength?: number;
+  /**
    * The Lexical composer namespace, used for editor identity.
    * @default 'astryx-editor'
    */
@@ -372,6 +399,7 @@ export const RichTextEditor = forwardRef<
     hasMarkdownShortcuts = true,
     transformers = TRANSFORMERS,
     hasAutoFocus = false,
+    maxLength,
     namespace = 'astryx-editor',
     xstyle,
     className,
@@ -385,6 +413,11 @@ export const RichTextEditor = forwardRef<
   const descriptionID = useId();
   const statusMessageID = useId();
   const placeholderID = useId();
+  const counterID = useId();
+
+  // Plain-text character count, tracked from inside the composer via
+  // CharCountPlugin. Only used when maxLength is set.
+  const [charCount, setCharCount] = useState(0);
 
   // Theme is stable per render; build once.
   const themeRef = useRef<EditorThemeClasses | null>(null);
@@ -417,6 +450,7 @@ export const RichTextEditor = forwardRef<
       description ? descriptionID : null,
       status?.message ? statusMessageID : null,
       placeholder ? placeholderID : null,
+      maxLength != null ? counterID : null,
     ]
       .filter(Boolean)
       .join(' ') || undefined;
@@ -495,9 +529,29 @@ export const RichTextEditor = forwardRef<
             )}
             {plugins}
             <EditorRefBridge editorRef={ref} editable={editable} />
+            {maxLength != null && (
+              <CharCountPlugin onCountChange={setCharCount} />
+            )}
           </div>
         </LexicalComposer>
       </div>
+      {maxLength != null && (
+        <div
+          id={counterID}
+          {...stylex.props(
+            styles.counter,
+            charCount > maxLength && styles.counterError,
+          )}>
+          {charCount}/{maxLength}
+          <VisuallyHidden aria-live="polite">
+            {charCount >= maxLength * COUNTER_WARNING_THRESHOLD
+              ? charCount > maxLength
+                ? `${charCount - maxLength} characters over limit`
+                : `${maxLength - charCount} characters remaining`
+              : ''}
+          </VisuallyHidden>
+        </div>
+      )}
     </Field>
   );
 });
@@ -557,6 +611,35 @@ function EditorRefBridge({
     }),
     [editor, editable],
   );
+  return null;
+}
+
+/**
+ * Tracks the editor's plain-text length and reports it to the host component.
+ * Split into its own plugin so it runs inside the composer context and can
+ * read the editor state via `useLexicalComposerContext()`. Renders nothing.
+ */
+function CharCountPlugin({
+  onCountChange,
+}: {
+  onCountChange: (count: number) => void;
+}): null {
+  const [editor] = useLexicalComposerContext();
+  useEffect(() => {
+    // Report the initial count (e.g. seeded via defaultValue) from the mounted
+    // root element's text, then track changes via registerTextContentListener,
+    // which hands us the plain-text content directly.
+    //
+    // We deliberately avoid importing `$getRoot` from the top-level `lexical`
+    // package: that is a *runtime value* import, and in the sandbox's Next
+    // build it forces Babel to transpile lexical's raw `src/*.ts` (which uses
+    // `declare` class fields) and fails. Both APIs used here are methods on the
+    // editor instance, so no top-level `lexical` value import is needed.
+    onCountChange(editor.getRootElement()?.textContent?.length ?? 0);
+    return editor.registerTextContentListener((textContent) => {
+      onCountChange(textContent.length);
+    });
+  }, [editor, onCountChange]);
   return null;
 }
 
