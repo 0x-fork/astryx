@@ -83,6 +83,17 @@ export async function component(name, options = {}) {
 
   const coreDir = requireCoreDir(cwd);
 
+  // A public API caller could pass a non-string category; the list leaf does
+  // `category.toLowerCase()`, so guard it up front (same class as the name
+  // guard below) instead of throwing a raw TypeError with no `.code`.
+  if (category != null && typeof category !== 'string') {
+    throw new AstryxError(
+      `Unknown category "${String(category)}"`,
+      undefined,
+      ERROR_CODES.ERR_UNKNOWN_CATEGORY,
+    );
+  }
+
   // ── List mode ──────────────────────────────────────────────────
   if (category || list || !name) {
     return componentList(coreDir, {cwd, category, detail, zh, dense, lang});
@@ -119,6 +130,20 @@ export async function component(name, options = {}) {
           name,
           notFoundInPackage: scoped.kind === 'integration' ? packageScope : null,
         });
+      }
+      // showcase/blocks were previously dropped on the scoped path — a
+      // `--package ... --showcase`/`--blocks` request silently fell through to
+      // component.detail. Route them to the same leaves the no-scope path uses.
+      // Core showcases carry no `package` field, so a core scope must NOT pass
+      // packageScope (findShowcase filters those out); integrations never carry
+      // a showcase, so skip discovery entirely.
+      if (showcase) {
+        return scoped.kind === 'core'
+          ? componentDetailShowcase(dirName, {cwd, name})
+          : componentDetailShowcase(dirName, {cwd, name, resolve: false});
+      }
+      if (blocks) {
+        return componentDetailBlocks(dirName);
       }
       const docs = await loadComponentDoc(owner.docPath, docOpts);
       if (props) return componentDetailProps(docs);
