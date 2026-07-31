@@ -34,15 +34,6 @@ import {componentDetailSource} from './detail/source/source.mjs';
 import {componentDetailShowcase} from './detail/showcase/showcase.mjs';
 import {componentDetailBlocks} from './detail/blocks/blocks.mjs';
 
-export {
-  componentList,
-  componentDetail,
-  componentDetailProps,
-  componentDetailSource,
-  componentDetailShowcase,
-  componentDetailBlocks,
-};
-
 /**
  * @param {string} [name]
  * @param {object} [options]
@@ -59,12 +50,12 @@ export {
  * @param {boolean} [options.zh]
  * @param {boolean} [options.dense]
  * @returns {Promise<(
- *   import('../../types/component').ComponentListResponse
- *   | import('../../types/component').ComponentDetailResponse
- *   | import('../../types/component').ComponentDetailPropsResponse
- *   | import('../../types/component').ComponentDetailSourceResponse
- *   | import('../../types/component').ComponentDetailShowcaseResponse
- *   | import('../../types/component').ComponentDetailBlocksResponse
+ *   import('./component.type.mjs').ComponentListResponse
+ *   | import('./component.type.mjs').ComponentDetailResponse
+ *   | import('./component.type.mjs').ComponentDetailPropsResponse
+ *   | import('./component.type.mjs').ComponentDetailSourceResponse
+ *   | import('./component.type.mjs').ComponentDetailShowcaseResponse
+ *   | import('./component.type.mjs').ComponentDetailBlocksResponse
  * )>}
  */
 export async function component(name, options = {}) {

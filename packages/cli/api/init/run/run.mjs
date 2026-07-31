@@ -9,7 +9,7 @@
  * starter template — with NO prompts, so it behaves identically for humans,
  * agents, CI, and piped I/O. It performs the side effects and returns an
  * `init.run` receipt. Hard errors (unknown feature/template) throw AstryxError
- * with a stable code. Human output is emitted through the injected `logger`
+ * with a stable code. Human output is emitted through the shared `logger`
  * (silent by default) so the CLI keeps its exact plain output and a
  * programmatic caller stays quiet.
  */
@@ -23,7 +23,7 @@ import {installAgentDocs} from '../../../lib/agent-docs/agent-docs.mjs';
 import {listTemplates} from '../../template/template.mjs';
 import {AstryxError} from '../../error.mjs';
 import {ERROR_CODES} from '../../../lib/error-codes.mjs';
-import {noopInitLogger} from '../_adapter.mjs';
+import {logger} from '../../logger.mjs';
 
 const VALID_FEATURES = ['agents', 'theme', 'template'];
 
@@ -63,12 +63,11 @@ export function getNextSteps(invocation) {
  * generic retry hint and continues without changing the exit code.
  *
  * @param {string} cwd
- * @param {import('../../../types/api').InitOptions} options
+ * @param {import('../init.type.mjs').InitOptions} options
  * @param {string} invocation
- * @param {import('../_adapter.mjs').InitLogger} logger
- * @param {import('../../../types/init').InitRunData} data
+ * @param {import('../init.type.mjs').InitRunData} data
  */
-function applyAgents(cwd, options, invocation, logger, data) {
+function applyAgents(cwd, options, invocation, data) {
   try {
     const paths = options.agentDocsPath
       ? Array.isArray(options.agentDocsPath)
@@ -102,10 +101,9 @@ function applyAgents(cwd, options, invocation, logger, data) {
  * @param {string} cwd
  * @param {{templateName?: string}} opts
  * @param {string} invocation
- * @param {import('../_adapter.mjs').InitLogger} logger
- * @param {import('../../../types/init').InitRunData} data
+ * @param {import('../init.type.mjs').InitRunData} data
  */
-function applyTemplate(cwd, {templateName}, invocation, logger, data) {
+function applyTemplate(cwd, {templateName}, invocation, data) {
   const templates = listTemplates();
   if (templates.length === 0) {
     data.template = 'skipped';
@@ -157,11 +155,11 @@ function applyTemplate(cwd, {templateName}, invocation, logger, data) {
  * emitted through `logger` (silent by default); unknown feature or template
  * names throw AstryxError with a stable code.
  *
- * @param {import('../../../types/api').InitOptions} [options]
- * @param {{cwd?: string, logger?: import('../_adapter.mjs').InitLogger}} [ctx]
- * @returns {Promise<import('../../../types/init').InitRunResponse>}
+ * @param {import('../init.type.mjs').InitOptions} [options]
+ * @param {{cwd?: string}} [ctx]
+ * @returns {Promise<import('../init.type.mjs').InitRunResponse>}
  */
-export async function run(options = {}, {cwd = process.cwd(), logger = noopInitLogger} = {}) {
+export async function run(options = {}, {cwd = process.cwd()} = {}) {
   const invocation = getCliInvocation();
 
   // Non-interactive feature install: --features or --all.
@@ -181,7 +179,7 @@ export async function run(options = {}, {cwd = process.cwd(), logger = noopInitL
       );
     }
 
-    /** @type {import('../../../types/init').InitRunData} */
+    /** @type {import('../init.type.mjs').InitRunData} */
     const data = {
       mode: 'features',
       features,
@@ -193,7 +191,7 @@ export async function run(options = {}, {cwd = process.cwd(), logger = noopInitL
       nextSteps: false,
     };
     for (const feature of features) {
-      if (feature === 'agents') applyAgents(cwd, options, invocation, logger, data);
+      if (feature === 'agents') applyAgents(cwd, options, invocation, data);
       if (feature === 'theme') {
         logger.log(
           `✓ For a custom theme, run \`${invocation} theme\` (browse) or \`${invocation} theme add <slug>\` (scaffold).`,
@@ -201,7 +199,7 @@ export async function run(options = {}, {cwd = process.cwd(), logger = noopInitL
         data.theme = true;
       }
       if (feature === 'template') {
-        applyTemplate(cwd, {templateName: options.templateName}, invocation, logger, data);
+        applyTemplate(cwd, {templateName: options.templateName}, invocation, data);
       }
     }
     return {type: 'init.run', data};
@@ -209,7 +207,7 @@ export async function run(options = {}, {cwd = process.cwd(), logger = noopInitL
 
   // No flags: TTY-free default — install the AI agent cheat sheet with NO
   // prompts, then print the getting-started guidance.
-  /** @type {import('../../../types/init').InitRunData} */
+  /** @type {import('../init.type.mjs').InitRunData} */
   const data = {
     mode: 'default',
     features: ['agents'],
@@ -220,7 +218,7 @@ export async function run(options = {}, {cwd = process.cwd(), logger = noopInitL
     templatePath: null,
     nextSteps: true,
   };
-  applyAgents(cwd, options, invocation, logger, data);
+  applyAgents(cwd, options, invocation, data);
   logger.log('');
   logger.log(
     `  Tip: \`${invocation} init --all\` also points you to the theme and page-building workflows.`,
