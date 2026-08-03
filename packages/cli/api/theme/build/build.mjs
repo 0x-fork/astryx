@@ -33,6 +33,7 @@ import {createJiti} from 'jiti';
 import {getCliInvocation} from '../../../foundation/env/package-manager.mjs';
 import {CLI_ROOT, findCoreDir} from '../../../foundation/fs/paths.mjs';
 import {
+  assertWithin,
   sanitizeName,
   PathSafetyError,
 } from '../../../foundation/fs/path-safety.mjs';
@@ -1130,9 +1131,17 @@ export async function themeBuild(
   // Derive the default CSS name from the theme name so .css/.js/.d.ts
   // share one scheme; an explicit --out still wins.
   const baseName = themeDef.name;
-  const outPath = options.out
-    ? path.resolve(cwd, options.out)
-    : path.join(path.dirname(filePath), `${baseName}.css`);
+  let outPath;
+  if (options.out) {
+    outPath = path.resolve(cwd, options.out);
+    // Guard: relative paths must not escape cwd via `../`. Absolute paths are
+    // trusted (the user explicitly controls where output goes, like gcc -o).
+    if (!path.isAbsolute(options.out)) {
+      assertWithin(options.out, cwd, {label: 'output path'});
+    }
+  } else {
+    outPath = path.join(path.dirname(filePath), `${baseName}.css`);
+  }
 
   const displayTheme = resolvedTheme || themeDef;
   const tokenCount = displayTheme.tokens
