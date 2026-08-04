@@ -105,7 +105,7 @@ export const docs = {
           name: 'hasSearch',
           type: 'boolean',
           description:
-            'Whether to show a search input for filtering options. As the user types, the match count (or "No results found") is announced to screen readers via a polite live region.',
+            'Whether to show a search input for filtering options. As the user types, the match count (or "No results found") is announced to screen readers via a polite live region. The search field has built-in affordances: a leading magnifier icon and, once a query is typed, a trailing clear (✕) button that resets the query and returns focus to the input.',
         },
         {
           name: 'searchPlaceholder',

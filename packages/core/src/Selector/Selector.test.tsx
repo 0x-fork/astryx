@@ -1473,3 +1473,125 @@ describe('Selector indicator (chevron) icon theme target', () => {
     expect(css).toContain('color: var(--color-icon-primary)');
   });
 });
+
+describe('Selector search affordances', () => {
+  it('renders a decorative (aria-hidden) magnifier icon whenever hasSearch is on', async () => {
+    const user = userEvent.setup();
+    render(
+      <Selector
+        label="Fruit"
+        options={OPTIONS}
+        value="Apple"
+        onChange={() => {}}
+        hasSearch
+      />,
+    );
+    await user.click(screen.getByRole('button', {name: 'Fruit'}));
+    const search = screen.getByRole('combobox', {hidden: true});
+    // The search field is a TextInput; the magnifier is its startIcon, so it
+    // sits inside the input container as a sibling of the <input>.
+    const container = search.parentElement;
+    const magnifier = container?.querySelector('.astryx-icon');
+    expect(magnifier).toBeTruthy();
+    // Decorative: the icon is hidden from assistive tech and carries no name.
+    expect(magnifier?.getAttribute('aria-hidden')).toBe('true');
+    expect(magnifier?.getAttribute('aria-label')).toBeNull();
+  });
+
+  it('renders the clear button once a query is typed and clears + refocuses on click', async () => {
+    const user = userEvent.setup();
+    render(
+      <Selector
+        label="Fruit"
+        options={OPTIONS}
+        value="Apple"
+        onChange={() => {}}
+        hasSearch
+      />,
+    );
+    await user.click(screen.getByRole('button', {name: 'Fruit'}));
+    const search = screen.getByRole('combobox', {hidden: true});
+    await user.type(search, 'ap');
+    expect(search).toHaveValue('ap');
+
+    // The clear button is TextInput's built-in hasClear affordance; its name is
+    // derived from the field label ("Search options").
+    const clear = screen.getByRole('button', {
+      name: 'Clear Search options',
+      hidden: true,
+    });
+
+    await user.click(clear);
+    expect(search).toHaveValue('');
+    expect(search).toHaveFocus();
+  });
+
+  it('does not render the clear button when the query is empty', async () => {
+    const user = userEvent.setup();
+    render(
+      <Selector
+        label="Fruit"
+        options={OPTIONS}
+        value="Apple"
+        onChange={() => {}}
+        hasSearch
+      />,
+    );
+    await user.click(screen.getByRole('button', {name: 'Fruit'}));
+    expect(
+      screen.queryByRole('button', {
+        name: 'Clear Search options',
+        hidden: true,
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('keeps the combobox contract on the input, not the affordances', async () => {
+    const user = userEvent.setup();
+    render(
+      <Selector
+        label="Fruit"
+        options={OPTIONS}
+        value="Apple"
+        onChange={() => {}}
+        hasSearch
+      />,
+    );
+    await user.click(screen.getByRole('button', {name: 'Fruit'}));
+    // Exactly one combobox — the input. The magnifier and clear button are not
+    // part of the combobox contract.
+    const comboboxes = screen.getAllByRole('combobox', {hidden: true});
+    expect(comboboxes).toHaveLength(1);
+    expect(comboboxes[0].tagName).toBe('INPUT');
+    expect(comboboxes[0]).toHaveAttribute('aria-autocomplete', 'list');
+  });
+
+  it('tabs from the search input to the clear button (keeping the popup open) when a query is showing it', async () => {
+    const user = userEvent.setup();
+    render(
+      <Selector
+        label="Fruit"
+        options={OPTIONS}
+        value="Apple"
+        onChange={() => {}}
+        hasSearch
+      />,
+    );
+    await user.click(screen.getByRole('button', {name: 'Fruit'}));
+    const trigger = screen.getByRole('button', {name: 'Fruit'});
+    const search = screen.getByRole('combobox', {hidden: true});
+    await user.type(search, 'ap');
+    expect(search).toHaveFocus();
+
+    // Forward-tab lands on the clear (✕) button and the popup stays open, so
+    // the affordance is keyboard-reachable rather than being skipped when the
+    // input's Tab dismisses the popup.
+    await user.tab();
+    const clear = screen.getByRole('button', {
+      name: 'Clear Search options',
+      hidden: true,
+    });
+    expect(clear).toHaveFocus();
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  });
+});

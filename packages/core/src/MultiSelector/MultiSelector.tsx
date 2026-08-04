@@ -41,6 +41,7 @@ import {
 } from '../Field';
 import {Divider} from '../Divider';
 import {Spinner} from '../Spinner';
+import {TextInput} from '../TextInput';
 import {CheckboxInput} from '../CheckboxInput';
 import {Badge} from '../Badge';
 import {
@@ -210,32 +211,14 @@ const styles = stylex.create({
     marginBlockStart: spacingVars['--spacing-1'],
   },
 
-  // Search input
+  // Search field. The inner TextInput owns the border, focus ring, magnifier
+  // (startIcon), and clear button (hasClear); this wrapper only supplies the
+  // dropdown's inline/block padding around it.
   searchWrapper: {
+    display: 'flex',
+    alignItems: 'center',
     paddingInline: spacingVars['--spacing-2'],
     paddingBlock: spacingVars['--spacing-1'],
-  },
-  searchInput: {
-    boxSizing: 'border-box',
-    width: '100%',
-    paddingBlock: spacingVars['--spacing-1'],
-    paddingInline: spacingVars['--spacing-2'],
-    borderWidth: borderVars['--border-width'],
-    borderStyle: 'solid',
-    borderColor: colorVars['--color-border-emphasized'],
-    borderRadius: radiusVars['--radius-element'],
-    backgroundColor: colorVars['--color-background-surface'],
-    fontFamily: typographyVars['--font-family-body'],
-    fontSize: {
-      default: typeScaleVars['--text-label-size'],
-      '@media (pointer: coarse)': `max(1rem, ${typeScaleVars['--text-label-size']})`,
-    },
-    color: colorVars['--color-text-primary'],
-    outline: {
-      default: 'none',
-      ':focus': `${borderVars['--border-width']} solid ${colorVars['--color-accent']}`,
-    },
-    outlineOffset: '0',
   },
 
   // Select-all wrapper
@@ -669,6 +652,9 @@ export function MultiSelector<T extends MultiSelectorOptionType>({
   const inputGroup = useInputGroup();
 
   const [searchQuery, setSearchQuery] = useState('');
+  // A typed query shows TextInput's built-in clear (✕) button, which becomes
+  // the next tab stop after the search input.
+  const hasQuery = searchQuery.length > 0;
 
   // Snapshot of which values were selected when the dropdown opened.
   // Stored as state (not a ref) so sortedItems recomputes exactly once on open,
@@ -818,8 +804,7 @@ export function MultiSelector<T extends MultiSelectorOptionType>({
   // not re-speak on unrelated re-renders. Reuses the announce instance shared
   // with the selection-count announcements above.
   const handleSearchChange = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
-      const nextQuery = event.target.value;
+    (nextQuery: string) => {
       setSearchQuery(nextQuery);
       if (nextQuery.length === 0) {
         // Emptying the query clears the region rather than announcing a count.
@@ -1065,13 +1050,41 @@ export function MultiSelector<T extends MultiSelectorOptionType>({
       return null;
     }
     return (
-      <div {...stylex.props(styles.searchWrapper)}>
-        <input
+      <div
+        {...stylex.props(styles.searchWrapper)}
+        onKeyDown={e => {
+          // The clear (✕) button lives inside the TextInput, after the input in
+          // DOM order. When it is focused and the user tabs forward there is
+          // nothing else in the popup, so dismiss it (Shift+Tab returns to the
+          // input natively). Key events originating on the input are handled on
+          // the input below; ignore them here so we don't double-dismiss.
+          if (e.target === searchRef.current) {
+            return;
+          }
+          if (e.key === 'Tab' && !e.shiftKey) {
+            onKeyDown(e);
+          }
+        }}>
+        <TextInput
           ref={searchRef}
           id={searchId}
+          // The search field IS a TextInput: the leading magnifier is its
+          // `startIcon` and the trailing clear (✕) is its built-in `hasClear`
+          // (which resets the value and refocuses the input). We add no bespoke
+          // affordance chrome — the field just looks and behaves like every
+          // other Astryx input.
+          label={t('@astryx.multiSelector.searchOptions')}
+          isLabelHidden
+          startIcon="search"
+          hasClear
+          size="sm"
+          // Fill the dropdown's width (minus the wrapper's inline padding) so
+          // the field is flush end-to-end rather than sized to its content.
+          width="100%"
           // When hasSearch is set, focus moves into this input on open, so it —
           // not the trigger — must be the combobox reporting the highlighted
-          // option via aria-activedescendant (comboboxes-4).
+          // option via aria-activedescendant (comboboxes-4). role + aria-* pass
+          // through to the underlying <input> via BaseProps.
           role="combobox"
           aria-expanded={popover.isOpen}
           aria-controls={listboxId}
@@ -1081,12 +1094,10 @@ export function MultiSelector<T extends MultiSelectorOptionType>({
               ? getItemId(highlightedIndex)
               : undefined
           }
-          aria-label={t('@astryx.multiSelector.searchOptions')}
-          type="text"
           value={searchQuery}
           onChange={handleSearchChange}
           onKeyDown={e => {
-            // Arrow keys navigate options; Enter toggles; Escape/Tab close.
+            // Arrow keys navigate options; Enter toggles; Escape closes.
             // Space and Home/End are left to the input (type a space / move
             // the caret) per the APG editable combobox; PageUp/PageDown are
             // the sanctioned substitute for jumping to the first/last option.
@@ -1096,14 +1107,19 @@ export function MultiSelector<T extends MultiSelectorOptionType>({
               e.key === 'PageUp' ||
               e.key === 'PageDown' ||
               e.key === 'Enter' ||
-              e.key === 'Escape' ||
-              e.key === 'Tab'
+              e.key === 'Escape'
             ) {
+              onKeyDown(e);
+              return;
+            }
+            // Tab: when a query is showing the clear (✕) button, forward-tab
+            // moves focus to it (keeping the popup open) so the affordance is
+            // keyboard-reachable. Every other Tab dismisses the popup as usual.
+            if (e.key === 'Tab' && (e.shiftKey || !hasQuery)) {
               onKeyDown(e);
             }
           }}
           placeholder={searchPlaceholder}
-          {...stylex.props(styles.searchInput)}
         />
       </div>
     );
@@ -1112,6 +1128,7 @@ export function MultiSelector<T extends MultiSelectorOptionType>({
     searchId,
     listboxId,
     searchQuery,
+    hasQuery,
     searchPlaceholder,
     handleSearchChange,
     onKeyDown,
