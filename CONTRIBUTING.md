@@ -317,6 +317,73 @@ Two repo-side rules worth restating here:
   keyboard behavior, focus management, and announcement timing are exactly
   what the checklist and the component's unit tests cover.
 
+## Working on the `astryx` CLI
+
+The CLI (`packages/cli/`) is layered so behavior, presentation, and contracts stay separable:
+
+- **`clients/cli/`** — the Commander program and per-command handlers. A handler is a _thin wrapper_: parse flags → call the matching `api/` function → render (JSON via `jsonOut`, or text via the formatter kit in `clients/cli/formatters/`).
+- **`api/`** — the programmatic API (`@astryxdesign/cli/api`). Each command maps to `api/<name>/`, whose functions return a typed `{ type, data }` envelope. This is the behavior source of truth, so `astryx --json` and the imported function return identical data.
+- **`authoring/`** — the pure data contracts (`@astryxdesign/cli/authoring`): the TypeScript types you author objects against (config, integration, codemod, and the doc-types) plus the sealed zod parsers the CLI runs at the load boundary.
+- **`foundation/`** — cross-cutting infra: the `{ type, data }` JSON contract, the stable `ERROR_CODES`, discovery, and path-safety.
+
+### The CLI documents itself
+
+Every CLI surface has a colocated, typed `.doc.mjs` next to what it describes, annotated with a `@type` from `@astryxdesign/cli/authoring`:
+
+| Surface                                                                                 | Doc-type                                             | Lives next to                                              |
+| --------------------------------------------------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------- |
+| An API function (a hook or an `api/` export)                                            | `FunctionDoc`                                        | `api/<name>/<fn>.doc.mjs`                                  |
+| A CLI command                                                                           | `CommandDoc` (references its `FunctionDoc` via `fn`) | `clients/cli/commands/<name>.doc.mjs`                      |
+| An authored object (config, integration, codemod, the doc-types, the response envelope) | `SchemaDoc`                                          | beside the schema (`authoring/**`, `foundation/response/`) |
+| A closed vocabulary (error codes, response types)                                       | `EnumDoc`                                            | `foundation/response/`                                     |
+| A long-form topic (tokens, principles, theming, …)                                      | `ReferenceDoc`                                       | `assets/docs/<topic>.doc.mjs`                              |
+
+These are not free-form. `parseDoc` validates each at load, and a **drift harness** (`packages/cli/test/drift/`) enforces that they mirror their source of truth: every `CommandDoc`'s `fn`/args/options match the live CLI, and the `EnumDoc`s equal `ERROR_CODES` / the manifest's response-type set exactly. A doc that drifts fails CI.
+
+### What's enforced for you
+
+Most of the conventions above are mechanical, so they're checked rather than reviewed:
+
+| Rule                                                                                                          | Enforced by                      |
+| ------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| `authoring/` imports no other layer; `api/` never imports `clients/`                                          | ESLint (`no-restricted-imports`) |
+| zod stays sealed behind the `authoring/` parsers                                                              | ESLint (`no-restricted-imports`) |
+| commands register via `defineCommand`, never straight onto Commander                                          | ESLint (`no-restricted-syntax`)  |
+| each doc-type ships `type.ts` + `parse.mjs` + `parse.d.mts` + `<kind>.doc.mjs`, and its parser is re-exported | `pnpm check:cli-structure`       |
+| each `api/<name>/` ships its typedefs, a `FunctionDoc`, and a test                                            | `pnpm check:cli-structure`       |
+| every `CommandDoc`/`EnumDoc` matches the live CLI                                                             | the drift harness                |
+
+The declaration file (`parse.d.mts`) is the easiest one to forget and the most expensive to miss: `authoring/index.d.ts` re-exports each parser, so without it a strict consumer of the published package resolves that parser as `any` — and local typechecks won't catch it, because they run with `checkJs` and never exercise the packed `./api` surface. A hand-written declaration shadows the JSDoc in its `.mjs`, so it can also go stale while still compiling; `check:cli-structure` therefore asserts that every doc kind appears in the `parseDoc` return union too.
+
+### Adding a command
+
+Author the docs _before_ the handler: `defineCommand` builds the Commander command from the `CommandDoc`, so the handler needs it to exist.
+
+1. Add the behavior under `api/<name>/`, with a colocated `<name>.type.mjs` (the `Options` + `{ type, data }` response typedefs — the shape source of truth) and a test.
+2. Author the docs — a `FunctionDoc` at `api/<name>/<fn>.doc.mjs` and a `CommandDoc` at `clients/cli/commands/<name>.doc.mjs`. Copy the `search` pair as a template.
+3. Write the thin handler in `clients/cli/commands/<name>.mjs`, registering it with `defineCommand(program, <name>Command, {fn: <name>Fn, action})` so `--help` and the manifest come from the doc. Call its `register<Name>` from `clients/cli/index.mjs`.
+4. Run the checks below. The drift harness catches a doc that disagrees with the live command, and `check:cli-structure` catches a missing typedef, doc, or test.
+
+### Testing the CLI
+
+```bash
+# Run the CLI locally (no build needed)
+node packages/cli/clients/cli/bin/astryx.mjs --help
+
+# Validate every colocated doc parses + mirrors its source of truth
+pnpm -F @astryxdesign/cli test              # includes the drift suite
+pnpm -F @astryxdesign/cli typecheck:authoring
+
+# Structural conventions (doc-type quartets, api/ leaf contents). Also runs as
+# part of `pnpm lint` via check:repo, and in the pre-commit hook.
+pnpm check:cli-structure
+
+# Keep the generated CLI README tables (commands, error codes, response types)
+# in sync with the manifest + EnumDocs. After an intended change, refresh + review:
+pnpm -F @astryxdesign/cli readme            # regenerate the tables
+pnpm -F @astryxdesign/cli readme:check      # CI gate: fails on any un-refreshed drift
+```
+
 ## Testing
 
 ### Run Tests
