@@ -227,6 +227,92 @@ export const ProgressPastMark: Story = {
   },
 };
 
+export const MarksAcrossVariants: Story = {
+  // A mark takes its color from what it sits on: inside the filled area it
+  // uses the fill variant's on-color (on-accent / on-success / on-warning /
+  // on-error), out on the bare track it uses the primary text color.
+  // Neutral and disabled fill with the muted gray, which has no on-token, so
+  // their marks keep one plain foreground on both sides — the primary text
+  // color for a live neutral bar, the secondary one for a disabled bar, which
+  // dims everything it draws.
+  //
+  // Every fill style is covered here: each semantic variant, the disabled
+  // fill, both fill extremes (nothing filled / fully filled), and the
+  // indeterminate fill, which ignores marks entirely.
+  render: () => {
+    const MARKS = [
+      {value: 30, label: 'Mark at 30'},
+      {value: 85, label: 'Mark at 85'},
+    ];
+    const section: React.CSSProperties = {
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '16px',
+      width: '320px',
+    };
+    const heading: React.CSSProperties = {
+      font: '600 12px/1.4 system-ui, sans-serif',
+      textTransform: 'uppercase',
+      letterSpacing: '0.06em',
+      opacity: 0.6,
+      marginBlockEnd: '-4px',
+    };
+    return (
+      <div style={{...section, gap: '28px'}}>
+        <div style={section}>
+          <div style={heading}>Semantic variants — 60% filled</div>
+          {(['accent', 'success', 'warning', 'error', 'neutral'] as const).map(
+            variant => (
+              <ProgressBar
+                key={variant}
+                value={60}
+                variant={variant}
+                label={variant}
+                hasValueLabel
+                marks={MARKS}
+              />
+            ),
+          )}
+          <ProgressBar
+            value={60}
+            isDisabled
+            label="disabled"
+            hasValueLabel
+            marks={MARKS}
+          />
+        </div>
+
+        <div style={section}>
+          <div style={heading}>Fill extremes</div>
+          <ProgressBar
+            value={0}
+            label="0% — every mark on the track"
+            hasValueLabel
+            marks={MARKS}
+          />
+          <ProgressBar
+            value={100}
+            label="100% — every mark on the fill"
+            hasValueLabel
+            marks={MARKS}
+          />
+          <ProgressBar
+            value={30}
+            label="30% — a mark exactly at the fill edge"
+            hasValueLabel
+            marks={MARKS}
+          />
+        </div>
+
+        <div style={section}>
+          <div style={heading}>Indeterminate — marks are ignored</div>
+          <ProgressBar isIndeterminate label="indeterminate" marks={MARKS} />
+        </div>
+      </div>
+    );
+  },
+};
+
 export const ThemedMarks: Story = {
   // Marks are themeable directly via the `progressbar-mark` target: a theme sets
   // `backgroundColor`, `width`, and `height` on it with `defineTheme` — no
