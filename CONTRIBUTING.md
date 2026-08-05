@@ -324,7 +324,7 @@ The CLI (`packages/cli/`) is layered so behavior, presentation, and contracts st
 - **`clients/cli/`** — the Commander program and per-command handlers. A handler is a _thin wrapper_: parse flags → call the matching `api/` function → render (JSON via `jsonOut`, or text via the formatter kit in `clients/cli/formatters/`).
 - **`api/`** — the programmatic API (`@astryxdesign/cli/api`). Each command maps to `api/<name>/`, whose functions return a typed `{ type, data }` envelope. This is the behavior source of truth, so `astryx --json` and the imported function return identical data.
 - **`authoring/`** — the pure data contracts (`@astryxdesign/cli/authoring`): the TypeScript types you author objects against (config, integration, codemod, and the doc-types) plus the sealed zod parsers the CLI runs at the load boundary.
-- **`foundation/`** — cross-cutting infra: the `{ type, data }` JSON contract, the stable `ERROR_CODES`, discovery, and path-safety.
+- **`foundation/`** — the bottom layer: cross-cutting infra that everything above builds on — the `{ type, data }` JSON contract, the stable `ERROR_CODES`, discovery (components, templates), integration contribution validators, and path-safety. It never imports `api/` or `clients/`; if foundation needs something, that something belongs in foundation.
 
 ### The CLI documents itself
 
@@ -344,16 +344,18 @@ These are not free-form. `parseDoc` validates each at load, and a **drift harnes
 
 Most of the conventions above are mechanical, so they're checked rather than reviewed:
 
-| Rule                                                                                                          | Enforced by                      |
-| ------------------------------------------------------------------------------------------------------------- | -------------------------------- |
-| `authoring/` imports no other layer; `api/` never imports `clients/`                                          | ESLint (`no-restricted-imports`) |
-| zod stays sealed behind the `authoring/` parsers                                                              | ESLint (`no-restricted-imports`) |
-| commands register via `defineCommand`, never straight onto Commander                                          | ESLint (`no-restricted-syntax`)  |
-| each doc-type ships `type.ts` + `parse.mjs` + `parse.d.mts` + `<kind>.doc.mjs`, and its parser is re-exported | `pnpm check:cli-structure`       |
-| each `api/<name>/` ships its typedefs, a `FunctionDoc`, and a test                                            | `pnpm check:cli-structure`       |
-| every `CommandDoc`/`EnumDoc` matches the live CLI                                                             | the drift harness                |
+| Rule                                                                                                                                              | Enforced by                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| the layer directions hold: `authoring/` imports no other layer, `foundation/` never imports `api/` or `clients/`, `api/` never imports `clients/` | ESLint (`no-restricted-imports`) |
+| zod stays sealed behind the `authoring/` parsers                                                                                                  | ESLint (`no-restricted-imports`) |
+| commands register via `defineCommand`, never straight onto Commander                                                                              | ESLint (`no-restricted-syntax`)  |
+| each doc-type ships `type.ts` + `parse.mjs` + `<kind>.doc.mjs`, re-exports its parser, and appears in `parseDoc`'s `@returns`                     | `pnpm check:cli-structure`       |
+| each `api/<name>/` ships its typedefs, a `FunctionDoc`, and a test                                                                                | `pnpm check:cli-structure`       |
+| every `CommandDoc`/`EnumDoc` matches the live CLI                                                                                                 | the drift harness                |
 
-The declaration file (`parse.d.mts`) is the easiest one to forget and the most expensive to miss: `authoring/index.d.ts` re-exports each parser, so without it a strict consumer of the published package resolves that parser as `any` — and local typechecks won't catch it, because they run with `checkJs` and never exercise the packed `./api` surface. A hand-written declaration shadows the JSDoc in its `.mjs`, so it can also go stale while still compiling; `check:cli-structure` therefore asserts that every doc kind appears in the `parseDoc` return union too.
+You never hand-write the `.d.mts` declarations. `scripts/sync-api-types.mjs` emits them for both `api/` and `authoring/` from the `.mjs` JSDoc — gitignored, regenerated at `prepack`, and stamped `@generated`. Edit the JSDoc and run `pnpm -F @astryxdesign/cli sync:api-types`.
+
+That matters because a hand-written declaration _shadows_ the JSDoc in its `.mjs`, and both ways it can lie shipped once: a missing declaration made a strict consumer resolve the parser as `any` (surfacing only at pack time as TS7016, since local typechecks run with `checkJs` and never exercise the packed surface), and a stale `parseDoc` union silently dropped three doc kinds from the published type while still compiling. Generation removes both. The one declaration still written by hand is `authoring/index.d.ts`, the curated public barrel.
 
 ### Adding a command
 
