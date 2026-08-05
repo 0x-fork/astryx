@@ -152,6 +152,12 @@ function CopyButton({value}: {value: string}) {
       variant="ghost"
       size="sm"
       icon={<Icon icon={copied ? 'check' : 'copy'} size="sm" color="inherit" />}
+      // Visible hover/focus hint via Button's built-in tooltip: 'Copy',
+      // flipping to 'Copied' after a successful copy in step with the icon.
+      // The full 'Copy <value>' string stays the aria-label for assistive tech.
+      tooltip={t(
+        copied ? '@astryx.timestamp.copied' : '@astryx.timestamp.copy',
+      )}
       label={
         copied
           ? t('@astryx.timestamp.copied')
