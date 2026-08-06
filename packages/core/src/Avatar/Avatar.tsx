@@ -338,6 +338,25 @@ export interface AvatarProps extends BaseProps<HTMLDivElement> {
 }
 
 /**
+ * Reuse a single segmenter when the runtime supports Intl.Segmenter.
+ */
+const graphemeSegmenter =
+  typeof Intl.Segmenter === 'function'
+    ? new Intl.Segmenter(undefined, {granularity: 'grapheme'})
+    : null;
+
+/**
+ * Return the first user-perceived character, with a code-point fallback.
+ */
+function firstGrapheme(word: string): string {
+  if (graphemeSegmenter) {
+    return [...graphemeSegmenter.segment(word)][0]?.segment ?? '';
+  }
+
+  return [...word][0] ?? '';
+}
+
+/**
  * Generates initials from a name string.
  * Takes the first letter of the first two words.
  * @example
@@ -352,9 +371,11 @@ function getInitials(name: string): string {
     return '';
   }
   if (words.length === 1) {
-    return words[0].charAt(0).toUpperCase();
+    return firstGrapheme(words[0]).toUpperCase();
   }
-  return (words[0].charAt(0) + words[words.length - 1].charAt(0)).toUpperCase();
+  return (
+    firstGrapheme(words[0]) + firstGrapheme(words[words.length - 1])
+  ).toUpperCase();
 }
 
 /**

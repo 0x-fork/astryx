@@ -65,6 +65,16 @@ describe('Avatar', () => {
     expect(icon?.querySelector('svg')).not.toBeNull();
   });
 
+  it('does not split an emoji surrogate pair when generating initials', () => {
+    render(<Avatar name="😀 Ada" data-testid="avatar" />);
+    expect(screen.getByTestId('avatar')).toHaveTextContent('😀A');
+  });
+
+  it('preserves a complete grapheme when generating initials', () => {
+    render(<Avatar name="🇬🇧 Ada" data-testid="avatar" />);
+    expect(screen.getByTestId('avatar')).toHaveTextContent('🇬🇧A');
+  });
+
   it('retries a new src after a previous src failed to load', () => {
     const {rerender} = render(
       <Avatar name="Ada" src="https://example.com/broken.jpg" />,
