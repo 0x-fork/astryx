@@ -37,6 +37,17 @@ export {Drawer, type DrawerProps} from './Drawer';
 // BottomSheet — mobile touch sheet on a native modal <dialog>
 export {BottomSheet, type BottomSheetProps} from './BottomSheet';
 
+// Tour — guided product-tour / NUX walkthrough (facebook/astryx#4239)
+export {
+  Tour,
+  type TourProps,
+  TourStep,
+  type TourStepProps,
+  useTour,
+  type UseTourReturn,
+  type TourDismissSource,
+} from './Tour';
+
 // Stat — experimental KPI/metric display
 export {
   Stat,
