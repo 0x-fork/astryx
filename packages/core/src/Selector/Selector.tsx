@@ -1098,7 +1098,10 @@ export function Selector<T extends SelectorOptionType>(
         <div
           key="empty"
           role="presentation"
-          {...stylex.props(styles.emptyState)}>
+          {...mergeProps(
+            themeProps('selector-empty-state'),
+            stylex.props(styles.emptyState),
+          )}>
           No results found
         </div>,
       ];
