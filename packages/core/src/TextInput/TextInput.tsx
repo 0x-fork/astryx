@@ -428,7 +428,7 @@ export function TextInput({
         {...rest}
         ref={mergeRefs(ref, inputRef)}
         id={id}
-        name={htmlName}
+        name={isDisabled ? undefined : htmlName}
         type={type}
         value={optimisticValue}
         onChange={handleChange}

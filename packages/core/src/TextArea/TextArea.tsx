@@ -544,7 +544,7 @@ export function TextArea({
           {...rest}
           ref={mergeRefs(ref, textareaRef)}
           id={id}
-          name={htmlName}
+          name={isDisabled ? undefined : htmlName}
           value={optimisticValue}
           onChange={handleChange}
           onPaste={onPaste}

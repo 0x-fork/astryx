@@ -655,7 +655,7 @@ export function NumberInput({
         {...rest}
         ref={mergeRefs(ref, inputRef)}
         id={id}
-        name={htmlName}
+        name={isDisabled ? undefined : htmlName}
         type="number"
         autoComplete={autoComplete}
         value={displayValue}
