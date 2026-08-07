@@ -105,6 +105,11 @@ export interface DropdownMenuItemData {
   isDisabled?: boolean;
   icon?: ReactNode | IconType;
   /**
+   * Visual variant for a leaf item. `'destructive'` renders it in the error
+   * color for dangerous actions (e.g. Delete). @default 'default'
+   */
+  variant?: 'default' | 'destructive';
+  /**
    * Nested submenu entries. When present, this row becomes a submenu (a
    * flyout revealing `items`) instead of a leaf action — no separate item
    * "type" is needed. Data-mode parity for the compound DropdownMenuSubMenu API.
