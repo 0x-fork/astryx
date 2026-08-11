@@ -312,9 +312,10 @@ export * from './MyComponent';
 Every new component — and any change to an interactive one — must clear the
 **[Accessibility Checklist](https://github.com/facebook/astryx/wiki/Accessibility-Checklist)**
 (wiki) before review. The checklist lives on the wiki so accessibility
-experts can refine it without a code PR; reviewers block on it (see the
-blocking criteria in `.github/copilot-instructions.md`), and it is a hard
-requirement for a lab → core promotion (see `packages/lab/README.md`).
+experts can refine it without a code PR; reviewers block on it (it is `A1`–`A16`
+on the [Component Audit Rubric](https://github.com/facebook/astryx/wiki/Component-Audit-Rubric)),
+and it is a hard requirement for a lab → core promotion (see
+`packages/lab/README.md`).
 
 Two repo-side rules worth restating here:
 
@@ -324,11 +325,12 @@ Two repo-side rules worth restating here:
   WAI-ARIA APG patterns and are tested once; a bespoke reimplementation of
   one is a review reject.
 - CI is the enforcement layer, not a replacement for the checklist: the
-  `pr-a11y` workflow runs an axe audit on every PR, a weekly workflow scans
-  the full component surface, and the `useAnnounce` lint rule rejects
-  hand-wired `aria-live` regions. axe only catches static, DOM-level issues —
-  keyboard behavior, focus management, and announcement timing are exactly
-  what the checklist and the component's unit tests cover.
+  `pr-a11y` job in `ci.yml` runs an axe audit on every PR that touches
+  components, a weekly workflow scans the full component surface, and the
+  `useAnnounce` lint rule rejects hand-wired `aria-live` regions. axe only
+  catches static, DOM-level issues — keyboard behavior, focus management, and
+  announcement timing are exactly what the checklist and the component's unit
+  tests cover.
 
 ## Working on the `astryx` CLI
 
@@ -542,11 +544,67 @@ Labels signal what's open for contribution:
 For **pull requests**, use GitHub's native **Draft** state to signal "not ready to review/merge
 yet" — open the PR as a draft and mark it ready for review when it's done.
 
+## What's expected of a change
+
+The bar — what a change has to carry, and what blocks — lives on the
+**[Component Audit Rubric](https://github.com/facebook/astryx/wiki/Component-Audit-Rubric)**.
+It is stated there once, so it cannot drift between this file, the reviewer
+instructions, and the wiki. Read it before you open a PR: it is the same page
+the reviewer applies to your change, and every check carries an id
+(`A8`, `T1`, `P2`…) so a finding always points back to the rule behind it.
+
+What you will find there:
+
+- **[The bright lines that block](https://github.com/facebook/astryx/wiki/Component-Audit-Rubric#the-checks)** —
+  hardcoded colors (`T1`, `T3`) · removing a themeable surface (`T2`) · raw CSS
+  where StyleX suffices (`T8`) or raw HTML where a primitive exists (`T29`) · a
+  broken accessible path (`A8`) and the accessibility bright lines (`A1`, `A3`,
+  `A14`) · hardcoded user-facing strings (`I1`, `I2`, `A16`) · public
+  API-convention violations (`P1`–`P10`) · dropped passthroughs and breaking
+  changes (`P2`, `P11`, `P12`) · a public-repo leak (`L15`) · a missing
+  changeset (`X20`). Severity is set by **what breaks if it ships**, not by how
+  likely the trigger is — the rubric states each rule, its exceptions, and how
+  it is judged.
+- **[The bar for your kind of change](https://github.com/facebook/astryx/wiki/Component-Audit-Rubric#reviewing-a-change)** —
+  a bug fix owes evidence it was broken before and is fixed now; a new feature
+  runs the automatable checks plus whatever the diff touches; a new component in
+  `core` gets a full audit; a new component in `lab` is deliberately lax, with
+  the audit as the **promotion gate** rather than an entry fee.
+- **[Which checks your diff earns](https://github.com/facebook/astryx/wiki/Component-Audit-Rubric#reviewing-a-change)** —
+  a trigger table from what you touched to the checks that fire, so a two-line
+  fix is not reviewed like a new component.
+- **[Recorded component grades](https://github.com/facebook/astryx/wiki/Component-Audit-Rubric#recording-an-audit)** —
+  audited components have a score and an open-blocker count in the wiki's
+  `component-scores.json` ledger, which is useful context on what shape a
+  component is in before you change it. Most components are unaudited, which
+  means "no evidence", not "fine". **No PR is gated on a score**, and you are
+  never asked to fix problems you inherited by touching a file.
+
+### Before you push
+
+These are this repo's mechanical gates. A reviewer stops at a red one rather
+than spending judgment on a PR that doesn't build.
+
+```bash
+pnpm lint:strict   # CI severity, not the local warn tier — a warn-tier-green PR is not lint-clean
+pnpm test          # the full suite, locally; CI is not your test runner
+pnpm build
+```
+
+`pnpm lint:strict` runs `pnpm check:repo` first, which covers `check:sync`,
+`check:package-boundaries`, `check:changesets`, `check:demo-media`,
+`check:executable-bits`, `check:cli-structure`, and `check:use-client` — so a
+green `lint:strict` also clears the changeset and `'use client'` gates.
+
+Also attach **before/after screenshots for any visual change**, and update the
+Storybook story for anything you added or altered.
+
 ## Pull Request Guidelines
 
 1. Create a feature branch from `main`
 2. Make your changes with tests
-3. Run `pnpm test` and `pnpm lint`
+3. Clear [Before you push](#before-you-push): `pnpm lint:strict`, `pnpm test`,
+   `pnpm build`
 4. Add a changeset if needed: `pnpm changeset:new`
 5. Open a PR with a clear description
 6. **Leave "Allow edits by maintainers" enabled** (it's checked by default when
@@ -563,12 +621,21 @@ yet" — open the PR as a draft and mark it ready for review when it's done.
 
 ## Code Style
 
+The design-system rules — StyleX usage, semantic tokens, theming, API
+conventions, accessibility — are on the wiki and indexed from the
+[Component Audit Rubric](https://github.com/facebook/astryx/wiki/Component-Audit-Rubric).
+What this repo enforces mechanically:
+
 - TypeScript strict mode
 - Functional components that declare `ref` as a prop (React 19 — no
   `forwardRef`; `@eslint-react/no-forward-ref` rejects it, and
   `@astryx/require-ref-prop` requires `ref?: React.Ref<T>` on a publicly
   exported props interface)
-- JSDoc comments for AI-assisted development
+- `'use client';` as the first statement of any file importing a React client
+  API — only comments and blank lines may precede it (`pnpm check:use-client`,
+  part of `pnpm check:repo`)
+- JSDoc comments for AI-assisted development, with `@example` fences left
+  untagged (plain ` ``` `) or Storybook autodocs won't render them
 - Export types alongside components
 
 ## Troubleshooting
