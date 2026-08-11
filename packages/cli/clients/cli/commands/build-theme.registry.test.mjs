@@ -60,7 +60,10 @@ function renderedClassLiterals() {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         walk(full);
-      } else if (entry.name.endsWith('.tsx') && !entry.name.endsWith('.test.tsx')) {
+      } else if (
+        (entry.name.endsWith('.tsx') || entry.name.endsWith('.ts')) &&
+        !entry.name.includes('.test.')
+      ) {
         const text = fs.readFileSync(full, 'utf8');
         for (const re of [
           /themeProps\(\s*'([^']+)'/g,

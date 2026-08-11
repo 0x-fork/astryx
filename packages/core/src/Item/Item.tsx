@@ -33,6 +33,7 @@ import {useLinkComponent} from '../Link/useLinkComponent';
 import {useClickableContainer} from '../hooks/useClickableContainer';
 import {useDevWarning} from '../hooks/useDevWarning';
 import {themeProps} from '../utils/themeProps';
+import {focusOutlineProps} from '../utils/focusOutline.stylex';
 
 // =============================================================================
 // Types
@@ -216,16 +217,6 @@ const styles = stylex.create({
         '@media (hover: hover)': colorVars['--color-overlay-hover'],
       },
       ':active': colorVars['--color-overlay-pressed'],
-    },
-  },
-  focusVisibleOutline: {
-    outline: {
-      default: 'none',
-      ':has(:focus-visible)': `2px solid ${colorVars['--color-accent']}`,
-    },
-    outlineOffset: {
-      default: '0',
-      ':has(:focus-visible)': '2px',
     },
   },
   highlighted: {
@@ -558,12 +549,11 @@ export function Item({
       aria-disabled={isDisabled || undefined}
       {...mergeProps(
         themeProps('item', {density, align}),
-        stylex.props(
+        focusOutlineProps.focusWithin(
           styles.root,
           densityStyles[density],
           align === 'start' && styles.alignStart,
           isInteractive && styles.interactive,
-          isInteractive && styles.focusVisibleOutline,
           isHighlighted && styles.highlighted,
           isSelected && styles.selected,
           isDisabled && !hasParentRole && styles.disabled,
