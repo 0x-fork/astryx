@@ -10,6 +10,7 @@
  * - docblock-example-format: Enforces @example blocks use ``` fenced code on a separate line
  * - no-raw-paragraph: Disallows components from rendering a <p> by default (render <div> so any content composes)
  * - no-style-only-wrapper: Disallows div/span wrappers that only style a single Astryx component (use xstyle)
+ * - no-nullish-jsx-guard: Flags `!= null` JSX render guards for rendered values (use isRenderable so false/''/true slots don't leak an empty element)
  *
  * Philosophy: Strict for agents (CI), lenient for humans (local dev)
  * - "strict" config: All rules as errors - use in CI/agent environments
@@ -26,6 +27,7 @@ import noReactIntrospectionRule from './no-react-introspection.js';
 import noClassnameClobberRule from './no-classname-clobber.js';
 import noHardcodedAnchorRule from './no-hardcoded-anchor.js';
 import noRawParagraphRule from './no-raw-paragraph.js';
+import noNullishJsxGuardRule from './no-nullish-jsx-guard.js';
 import noBorderShorthandRule from './no-border-shorthand.js';
 import noPhysicalPropertiesRule from './no-physical-properties.js';
 import noReactNamespaceHooksRule from './no-react-namespace-hooks.js';
@@ -245,6 +247,7 @@ const plugin = {
     'no-classname-clobber': noClassnameClobberRule,
     'no-hardcoded-anchor': noHardcodedAnchorRule,
     'no-raw-paragraph': noRawParagraphRule,
+    'no-nullish-jsx-guard': noNullishJsxGuardRule,
     'no-border-shorthand': noBorderShorthandRule,
     'no-physical-properties': noPhysicalPropertiesRule,
     'no-react-namespace-hooks': noReactNamespaceHooksRule,
@@ -280,6 +283,11 @@ plugin.configs.strict = {
     '@astryx/no-classname-clobber': 'error',
     '@astryx/no-hardcoded-anchor': 'error',
     '@astryx/no-raw-paragraph': 'error',
+    // Rolled out as a warning even in strict mode: core still has ~36 existing
+    // `slot != null && <El>{slot}</El>` guards to migrate to isRenderable().
+    // Kept as 'warn' so it surfaces everywhere (including CI) without failing
+    // the build; promote to 'error' once core is migrated (see issue #2538).
+    '@astryx/no-nullish-jsx-guard': 'warn',
     '@astryx/no-border-shorthand': 'error',
     // RTL physical→logical migration complete; errors to prevent regressions.
     '@astryx/no-physical-properties': 'error',
@@ -309,6 +317,7 @@ plugin.configs.recommended = {
     '@astryx/no-classname-clobber': 'error',
     '@astryx/no-hardcoded-anchor': 'warn',
     '@astryx/no-raw-paragraph': 'warn',
+    '@astryx/no-nullish-jsx-guard': 'warn',
     '@astryx/no-border-shorthand': 'warn',
     // RTL physical→logical migration complete; errors to prevent regressions.
     '@astryx/no-physical-properties': 'error',
