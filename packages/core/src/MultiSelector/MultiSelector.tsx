@@ -76,6 +76,7 @@ import type {BaseProps} from '../BaseProps';
 import type {SizeValue} from '../utils/types';
 import {useSize} from '../SizeContext/SizeContext';
 import {themeProps} from '../utils/themeProps';
+import {focusOutlineStyles} from '../utils/focusOutline.stylex';
 import {stableClassName} from '../naming';
 import {groupStyles} from '../InputGroup/groupStyles';
 import {useInputGroup} from '../InputGroup/InputGroupContext';
@@ -200,14 +201,6 @@ const styles = stylex.create({
       ':focus-within': 'none',
     },
     fontWeight: fontWeightVars['--font-weight-medium'],
-    outline: {
-      default: 'none',
-      ':has(:focus-visible)': `2px solid ${colorVars['--color-accent']}`,
-    },
-    outlineOffset: {
-      default: '0',
-      ':has(:focus-visible)': '3px',
-    },
     transitionProperty:
       'background-image, background-color, color, opacity, transform',
     transform: {
@@ -236,11 +229,6 @@ const styles = stylex.create({
     color: 'inherit',
     cursor: 'pointer',
     borderRadius: radiusVars['--radius-element'],
-    outline: {
-      default: 'none',
-      ':focus-visible': `${borderVars['--border-width']} solid ${colorVars['--color-accent']}`,
-    },
-    outlineOffset: 1,
   },
 
   // Dropdown container
@@ -1453,6 +1441,7 @@ export function MultiSelector<T extends MultiSelectorOptionType>({
             styles.triggerContainer,
             sizeStyles[size],
             variant === 'ghost' && styles.triggerGhost,
+            variant === 'ghost' && focusOutlineStyles.focusWithin,
             isDisabled && inputWrapperStyles.disabled,
             variant === 'ghost' && isDisabled && styles.triggerGhostDisabled,
             optimisticValue.length === 0 && styles.triggerPlaceholder,
@@ -1541,7 +1530,10 @@ export function MultiSelector<T extends MultiSelectorOptionType>({
               aria-label={t(STATUS_BUTTON_LABEL_KEY[status.type])}
               aria-describedby={statusTooltip.describedBy}
               onClick={e => e.stopPropagation()}
-              {...stylex.props(styles.statusButton)}>
+              {...stylex.props(
+                focusOutlineStyles.focusVisible,
+                styles.statusButton,
+              )}>
               <Icon
                 icon={STATUS_ICON_MAP[status.type]}
                 size="sm"
