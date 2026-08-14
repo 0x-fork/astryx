@@ -33,6 +33,7 @@ import {usePopover} from '../Popover/usePopover';
 import {useTooltip} from '../Tooltip';
 import {Icon, renderIconSlot, type IconType} from '../Icon';
 import {useIndicator} from '../Indicator';
+import type {IndicatorPosition} from '../Indicator';
 import type {IconName} from '../Icon';
 import {
   Field,
@@ -289,6 +290,19 @@ const styles = stylex.create({
     flex: 1,
     minWidth: 0,
   },
+  // The mark's column, reserved on every row and at either position, so a row
+  // occupies the same geometry whether or not it is the chosen one — the
+  // default check draws nothing when unchecked, and without the column a list
+  // would indent (or truncate) its chosen row differently from the rest.
+  // `minWidth` rather than `width`: a theme can replace `check` with a larger
+  // indicator (a radio is 20px at `sm`), and the column has to grow with it.
+  itemMarkColumn: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    minWidth: '1rem',
+  },
   itemCheckmark: {
     flexShrink: 0,
     width: 16,
@@ -507,6 +521,16 @@ interface SelectorPropsBase<
   renderOption?: (option: SelectorOptionData) => ReactNode;
 
   /**
+   * Which edge of the option row carries the selected mark. `start` reserves a
+   * mark column ahead of every label so they stay aligned, the way a native
+   * menu does; `end` is the house convention shared with Typeahead and
+   * CommandPalette.
+   *
+   * @default 'end'
+   */
+  indicatorPosition?: IndicatorPosition;
+
+  /**
    * Whether to show a search input for filtering options.
    * @default false
    */
@@ -656,6 +680,7 @@ export function Selector<T extends SelectorOptionType>(
     startIcon,
     htmlName,
     renderOption,
+    indicatorPosition = 'end',
     hasSearch = false,
     searchPlaceholder: searchPlaceholderFromProps,
     placement,
@@ -1076,6 +1101,45 @@ export function Selector<T extends SelectorOptionType>(
       const isHighlighted = flatIndex === highlightedIndex;
       const isSelected = item.value === normalizedValue;
 
+      /*
+       * Rendered UNCONDITIONALLY, with the state passed down: the default
+       * check draws nothing when unchecked, but a theme that replaces the
+       * `check` indicator with a radio needs the unselected state to draw
+       * its empty circle. `{isSelected && …}` would make that impossible.
+       *
+       * `selector-check` stays the stable target for the mark's position
+       * in the row; the indicator owns what the mark looks like.
+       */
+      const mark = (
+        <span {...stylex.props(styles.itemMarkColumn)}>
+          <SelectionMark
+            state={isSelected ? 'checked' : 'unchecked'}
+            size="sm"
+            isDisabled={item.disabled ?? false}
+            {...themeProps('selector-check')}
+          />
+        </span>
+      );
+
+      const optionContent = (
+        <span {...stylex.props(styles.itemContent)}>
+          {renderOption ? renderOption(item) : <DefaultOption option={item} />}
+        </span>
+      );
+
+      const content =
+        indicatorPosition === 'start' ? (
+          <>
+            {mark}
+            {optionContent}
+          </>
+        ) : (
+          <>
+            {optionContent}
+            {mark}
+          </>
+        );
+
       return (
         <div
           key={item.value}
@@ -1092,33 +1156,13 @@ export function Selector<T extends SelectorOptionType>(
             isSelected && styles.itemSelected,
             item.disabled && styles.itemDisabled,
           )}>
-          <span {...stylex.props(styles.itemContent)}>
-            {renderOption ? (
-              renderOption(item)
-            ) : (
-              <DefaultOption option={item} />
-            )}
-          </span>
-          {/*
-           * Rendered UNCONDITIONALLY, with the state passed down: the default
-           * check draws nothing when unchecked, but a theme that replaces the
-           * `check` indicator with a radio needs the unselected state to draw
-           * its empty circle. `{isSelected && …}` would make that impossible.
-           *
-           * `selector-check` stays the stable target for the mark's position
-           * in the row; the indicator owns what the mark looks like.
-           */}
-          <SelectionMark
-            state={isSelected ? 'checked' : 'unchecked'}
-            size="sm"
-            isDisabled={item.disabled ?? false}
-            {...themeProps('selector-check')}
-          />
+          {content}
         </div>
       );
     },
     [
       renderOption,
+      indicatorPosition,
       highlightedIndex,
       size,
       normalizedValue,
