@@ -10,8 +10,8 @@
  */
 
 import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest';
-import {render, screen, fireEvent, act} from '@testing-library/react';
-import {useState} from 'react';
+import {act, render, screen, fireEvent} from '@testing-library/react';
+import {createRef, useState} from 'react';
 import {BottomSheet} from './BottomSheet';
 
 // jsdom doesn't implement <dialog> open/close or pointer capture; stub them.
@@ -189,6 +189,35 @@ describe('BottomSheet', () => {
     expect(dialog).toBeInTheDocument();
     expect(dialog).toHaveAccessibleName('Filters');
     expect(screen.getByText('Sheet content')).toBeInTheDocument();
+  });
+
+  it('forwards DOM props and refs to the visual panel, not the dialog host', () => {
+    const panelRef = createRef<HTMLDivElement>();
+    const onClick = vi.fn();
+    render(
+      <BottomSheet
+        ref={panelRef}
+        isOpen
+        onOpenChange={() => {}}
+        label="Filters"
+        data-testid="filters-panel"
+        data-sheet-owner="search"
+        className="custom-panel"
+        onClick={onClick}>
+        Content
+      </BottomSheet>,
+    );
+
+    const panel = screen.getByTestId('filters-panel');
+    const dialog = screen.getByRole('dialog');
+    expect(panelRef.current).toBe(panel);
+    expect(panel.tagName).toBe('DIV');
+    expect(panel).toHaveClass('astryx-bottom-sheet', 'custom-panel');
+    expect(panel).toHaveAttribute('data-sheet-owner', 'search');
+    expect(dialog).not.toHaveAttribute('data-testid');
+
+    fireEvent.click(panel);
+    expect(onClick).toHaveBeenCalledTimes(1);
   });
 
   it('keeps consumer content as the last scroll-body child', () => {
@@ -904,21 +933,15 @@ describe('BottomSheet', () => {
       );
     }
 
-    it('restores focus to the opener after close', async () => {
-      vi.useFakeTimers();
-      try {
-        render(<Harness />);
-        const opener = screen.getByRole('button', {name: 'Open sheet'});
-        opener.focus();
-        fireEvent.click(opener);
-        fireEvent.click(screen.getByRole('button', {name: 'Done'}));
-        await act(async () => {
-          vi.runAllTimers();
-        });
-        expect(document.activeElement).toBe(opener);
-      } finally {
-        vi.useRealTimers();
-      }
+    it('restores focus to the opener after close', () => {
+      render(<Harness />);
+      const opener = screen.getByRole('button', {name: 'Open sheet'});
+      opener.focus();
+      fireEvent.click(opener);
+      fireEvent.click(screen.getByRole('button', {name: 'Done'}));
+      finishSheetExit();
+
+      expect(document.activeElement).toBe(opener);
     });
   });
 
