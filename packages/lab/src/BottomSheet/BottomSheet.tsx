@@ -4,7 +4,7 @@
 
 /**
  * @file BottomSheet.tsx
- * @input Uses React, StyleX, theme tokens, core hooks (useScrollLock), utils, useSheetGestures
+ * @input Uses React, StyleX, theme tokens, core hooks (useScrollLock), utils, useMobileKeyboard, useSheetGestures
  * @output Exports BottomSheet component and BottomSheetProps
  * @position Lab implementation; consumed by index.ts, tested by BottomSheet.test.tsx, demonstrated in Storybook
  *
@@ -16,6 +16,12 @@
  * full-height transparent shell with the visible sheet bottom-anchored inside.
  * That shell is what lets the sheet translate freely (including a little past
  * fully-open) without clipping against a fixed dialog edge.
+ *
+ * Form controls stay usable above mobile on-screen keyboards: the outer sheet
+ * keeps its measured height while visual-viewport overlap extends the internal
+ * scroll range and focused controls scroll into view. Short sheets lift only
+ * far enough to expose a usable focus area. Starting sheet travel or closing
+ * the sheet blurs the field to dismiss the keyboard.
  *
  * `hasScrim` picks the presentation: `true` (default) uses `showModal()` (top
  * layer, focus trap, scrim, scroll lock, background inert); `false` uses
@@ -35,7 +41,14 @@
  * - /apps/storybook/stories/BottomSheet.stories.tsx (examples and visual coverage)
  */
 
-import {useCallback, useEffect, useRef, useState, type ReactNode} from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import * as stylex from '@stylexjs/stylex';
 import type {BaseProps} from '@astryxdesign/core';
 import {
@@ -49,6 +62,7 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import {useDevWarning, useScrollLock} from '@astryxdesign/core/hooks';
 import {mergeProps, mergeRefs, themeProps} from '@astryxdesign/core/utils';
+import {useMobileKeyboard} from './useMobileKeyboard';
 import {useSheetGestures} from './useSheetGestures';
 
 // A non-modal sheet (hasScrim={false}) uses show() instead of showModal(), so
@@ -83,6 +97,11 @@ export type BottomSheetHeight = keyof typeof HEIGHT_BUDGETS;
 // upward overdrag rather than showing a gap.
 // SYNC: must match OVERSCROLL_MAX in useSheetGestures.ts (the drag cap).
 const OVERSCROLL_PADDING = 48;
+
+// Chrome Android needs trailing room after the final input when its suggestion
+// UI appears. This single value controls both the CSS scroll padding and the
+// hook's viewport calculations.
+const MOBILE_KEYBOARD_BOTTOM_CLEARANCE = 48;
 
 /**
  * Default snap detents in px, resolved against the *visual* viewport (like iOS
@@ -174,6 +193,10 @@ const styles = stylex.create({
     display: 'flex',
     justifyContent: 'center',
     pointerEvents: 'none',
+    // SYNC: custom property is set by useMobileKeyboard.ts. Applying the
+    // keyboard-only lift outside the measured sheet keeps hug height and drag
+    // detents stable.
+    transform: 'translateY(calc(0px - var(--_sheet-keyboard-lift, 0px)))',
   },
   sheet: {
     pointerEvents: 'auto',
@@ -237,6 +260,10 @@ const styles = stylex.create({
     flexGrow: 1,
     minHeight: 0,
     overflowY: 'auto',
+    // Set from visualViewport while the on-screen keyboard/browser chrome
+    // covers the stable sheet. The generated tail below extends the internal
+    // scroll range; the outer sheet and this flex item's box stay unchanged.
+    scrollPaddingBlockEnd: MOBILE_KEYBOARD_BOTTOM_CLEARANCE,
     // No overscroll bounce inside the sheet — a pull-down at the top edge is
     // handed off to the sheet drag (see useSheetGestures' touch handling)
     // rather than rubber-banding the content.
@@ -245,6 +272,16 @@ const styles = stylex.create({
     // intercepted via a non-passive touchmove listener, not by blocking
     // touch-action (which would suppress scrolling entirely).
     touchAction: 'pan-y',
+    // Extend the scroll range without inserting an element after public
+    // children. Direct children must retain their :last-child semantics for
+    // Astryx container edge compensation and consumer-authored selectors.
+    '::after': {
+      content: '""',
+      display: 'block',
+      // SYNC: custom property is set by useMobileKeyboard.ts.
+      blockSize: 'var(--_sheet-keyboard-inset, 0px)',
+      pointerEvents: 'none',
+    },
   },
   // Both budgets add the overdrag padding back to the height so the visible
   // height (minus the off-screen padding) matches the intended budget.
@@ -277,7 +314,10 @@ export interface BottomSheetProps extends BaseProps<HTMLDialogElement> {
    */
   label: string;
 
-  /** Sheet content, rendered below the grab handle in a scrollable area. */
+  /**
+   * Sheet content, rendered below the grab handle in a scrollable,
+   * mobile-keyboard-aware area.
+   */
   children: ReactNode;
 
   /**
@@ -326,6 +366,10 @@ export interface BottomSheetProps extends BaseProps<HTMLDialogElement> {
  * With `hasScrim={false}` it opens non-modally (`show()`, no scrim), leaving
  * the page behind interactive and scrollable.
  *
+ * Focused form controls scroll above the mobile on-screen keyboard without
+ * resizing the sheet. A short sheet temporarily lifts when it has no usable
+ * area above the keyboard. Moving the sheet dismisses the keyboard.
+ *
  * @example
  * ```
  * const [isOpen, setIsOpen] = useState(false);
@@ -352,7 +396,9 @@ export function BottomSheet({
   const isExiting = !isOpen && isPresented;
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const triggerRef = useRef<HTMLElement | null>(null);
+  const positionerNodeRef = useRef<HTMLDivElement | null>(null);
   const sheetNodeRef = useRef<HTMLDivElement | null>(null);
+  const bodyNodeRef = useRef<HTMLDivElement | null>(null);
   const close = useCallback(() => onOpenChange(false), [onOpenChange]);
 
   // Set imperatively (not via state) so a 60fps drag doesn't re-render. The
@@ -364,11 +410,33 @@ export function BottomSheet({
     );
   }, []);
 
-  const {contentProps, handleProps, bodyProps, sheetRef} = useSheetGestures({
+  const {
+    contentProps,
+    handleProps,
+    bodyProps,
+    sheetRef,
+    dragOffset,
+    settledOffset,
+    isDragging,
+  } = useSheetGestures({
     isOpen,
     onDismiss: close,
     snapHeights: defaultSnapHeights,
     onScrimOpacity: handleScrimOpacity,
+  });
+  const isSheetTraveling = isDragging && dragOffset !== settledOffset;
+  const mergedBodyRef = useMemo(
+    () => mergeRefs(bodyProps.ref, bodyNodeRef),
+    [bodyProps.ref],
+  );
+  useMobileKeyboard({
+    bodyRef: bodyNodeRef,
+    bottomClearance: MOBILE_KEYBOARD_BOTTOM_CLEARANCE,
+    isSheetTraveling,
+    isOpen,
+    positionerRef: positionerNodeRef,
+    preserveSheetHeight: height === 'hug',
+    sheetRef: sheetNodeRef,
   });
 
   // Modal: showModal() enters the top layer with a focus trap + ::backdrop and
@@ -396,9 +464,9 @@ export function BottomSheet({
         // otherwise only honor a descendant data-autofocus.
         const autofocus = dialog.querySelector<HTMLElement>('[data-autofocus]');
         if (autofocus) {
-          autofocus.focus();
+          autofocus.focus({preventScroll: true});
         } else if (hasScrim) {
-          sheetNodeRef.current?.focus();
+          sheetNodeRef.current?.focus({preventScroll: true});
         }
       }
     } else if (dialog.open) {
@@ -511,7 +579,7 @@ export function BottomSheet({
       onClick={handleClick}
       onKeyDown={handleKeyDown}
       {...props}>
-      <div {...stylex.props(styles.positioner)}>
+      <div ref={positionerNodeRef} {...stylex.props(styles.positioner)}>
         <div
           ref={mergeRefs(sheetRef, sheetNodeRef)}
           tabIndex={-1}
@@ -536,7 +604,10 @@ export function BottomSheet({
             aria-hidden="true">
             <div {...stylex.props(styles.handlePill)} />
           </div>
-          <div {...stylex.props(styles.body)} {...bodyProps}>
+          <div
+            {...stylex.props(styles.body)}
+            {...bodyProps}
+            ref={mergedBodyRef}>
             {children}
           </div>
         </div>
