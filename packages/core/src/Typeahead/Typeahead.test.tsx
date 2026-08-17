@@ -23,6 +23,7 @@ import userEvent from '@testing-library/user-event';
 import {Typeahead} from './Typeahead';
 import {BaseTypeahead} from './BaseTypeahead';
 import type {SearchSource, SearchableItem} from './types';
+import {InternationalizationProvider} from '../i18n';
 
 // Store original matches to restore later
 const originalMatches = HTMLElement.prototype.matches;
@@ -132,21 +133,94 @@ describe('BaseTypeahead', () => {
 
   it('announces the result count to a live region (comboboxes-6)', async () => {
     render(
-      <BaseTypeahead
-        searchSource={fruitSource}
-        value={null}
-        onChange={() => {}}
-        debounceMs={0}
-      />,
+      <InternationalizationProvider
+        locale="fr"
+        overrides={{
+          fr: {
+            '@astryx.typeahead.resultCount':
+              '{count, number} {count, plural, one {résultat} other {résultats}}',
+          },
+        }}>
+        <BaseTypeahead
+          searchSource={fruitSource}
+          value={null}
+          onChange={() => {}}
+          debounceMs={0}
+        />
+      </InternationalizationProvider>,
     );
     const input = screen.getByRole('combobox');
+    // "Ap" matches Apple only — the singular ICU branch.
     fireEvent.change(input, {target: {value: 'Ap'}});
 
     await waitFor(() => {
       const region = document.querySelector(
         '[data-astryx-live-region="polite"]',
       );
-      expect(region?.textContent).toMatch(/\d+ results?/);
+      // Exact, so the plural branch ("1 résultats") would fail.
+      expect(region?.textContent).toBe('1 résultat');
+    });
+  });
+
+  it('announces the plural result count', async () => {
+    render(
+      <InternationalizationProvider
+        locale="fr"
+        overrides={{
+          fr: {
+            '@astryx.typeahead.resultCount':
+              '{count, number} {count, plural, one {résultat} other {résultats}}',
+          },
+        }}>
+        <BaseTypeahead
+          searchSource={fruitSource}
+          value={null}
+          onChange={() => {}}
+          debounceMs={0}
+        />
+      </InternationalizationProvider>,
+    );
+    const input = screen.getByRole('combobox');
+    // "err" matches Cherry and Elderberry.
+    fireEvent.change(input, {target: {value: 'err'}});
+
+    await waitFor(() => {
+      const region = document.querySelector(
+        '[data-astryx-live-region="polite"]',
+      );
+      expect(region?.textContent).toBe('2 résultats');
+    });
+  });
+
+  it('speaks the result count from a provider catalog', async () => {
+    render(
+      <InternationalizationProvider
+        locale="fr"
+        messages={{
+          fr: {
+            '@astryx.typeahead.resultCount': {
+              defaultMessage:
+                '{count, number} {count, plural, one {résultat} other {résultats}}',
+            },
+          },
+        }}>
+        <BaseTypeahead
+          searchSource={fruitSource}
+          value={null}
+          onChange={() => {}}
+          debounceMs={0}
+        />
+      </InternationalizationProvider>,
+    );
+    const input = screen.getByRole('combobox');
+    fireEvent.change(input, {target: {value: 'err'}});
+
+    await waitFor(() => {
+      const region = document.querySelector(
+        '[data-astryx-live-region="polite"]',
+      );
+      // Same key through the catalog path rather than `overrides`.
+      expect(region?.textContent).toBe('2 résultats');
     });
   });
 

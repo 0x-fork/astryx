@@ -26,6 +26,7 @@ import {RadioIndicator} from '../Indicator';
 import {InputGroup, InputGroupText} from '../InputGroup';
 import {__resetLiveRegionsForTest} from '../hooks/useAnnounce';
 import {__resetInteractionModalityForTest} from '../utils/interactionModality';
+import {InternationalizationProvider} from '../i18n';
 import {defineTheme} from '../theme/defineTheme';
 import {Theme} from '../theme/Theme';
 import {generateThemeCSS} from '../theme/generateThemeRules';
@@ -1037,56 +1038,81 @@ describe('Selector', () => {
       it('announces the match count politely while searching', async () => {
         const user = userEvent.setup();
         render(
-          <Selector
-            label="Fruit"
-            options={OPTIONS}
-            value="Apple"
-            onChange={() => {}}
-            hasSearch
-          />,
+          <InternationalizationProvider
+            locale="fr"
+            overrides={{
+              fr: {
+                '@astryx.selector.resultCount':
+                  '{count, number} {count, plural, one {résultat} other {résultats}}',
+              },
+            }}>
+            <Selector
+              label="Fruit"
+              options={OPTIONS}
+              value="Apple"
+              onChange={() => {}}
+              hasSearch
+            />
+          </InternationalizationProvider>,
         );
         await user.click(screen.getByRole('button', {name: 'Fruit'}));
         // "a" matches Apple and Banana.
         await user.type(screen.getByRole('combobox', h), 'a');
         await waitFor(() => {
-          expect(politeRegion()).toHaveTextContent('2 results');
+          // The plural branch of a message no catalog supplies.
+          expect(politeRegion()?.textContent).toBe('2 résultats');
         });
       });
 
       it('announces the singular form when one option matches', async () => {
         const user = userEvent.setup();
         render(
-          <Selector
-            label="Fruit"
-            options={OPTIONS}
-            value="Apple"
-            onChange={() => {}}
-            hasSearch
-          />,
+          <InternationalizationProvider
+            locale="fr"
+            overrides={{
+              fr: {
+                '@astryx.selector.resultCount':
+                  '{count, number} {count, plural, one {résultat} other {résultats}}',
+              },
+            }}>
+            <Selector
+              label="Fruit"
+              options={OPTIONS}
+              value="Apple"
+              onChange={() => {}}
+              hasSearch
+            />
+          </InternationalizationProvider>,
         );
         await user.click(screen.getByRole('button', {name: 'Fruit'}));
-        // "ban" matches only Banana. Anchored so it cannot pass on "1 results".
+        // "ban" matches only Banana. Exact, so "1 résultats" would fail.
         await user.type(screen.getByRole('combobox', h), 'ban');
         await waitFor(() => {
-          expect(politeRegion()).toHaveTextContent(/^1 result$/);
+          expect(politeRegion()?.textContent).toBe('1 résultat');
         });
       });
 
-      it('announces "No results found" when nothing matches', async () => {
+      it('announces the empty-results message when nothing matches', async () => {
         const user = userEvent.setup();
         render(
-          <Selector
-            label="Fruit"
-            options={OPTIONS}
-            value="Apple"
-            onChange={() => {}}
-            hasSearch
-          />,
+          <InternationalizationProvider
+            locale="fr"
+            overrides={{
+              fr: {'@astryx.selector.emptySearchResults': 'Aucun résultat'},
+            }}>
+            <Selector
+              label="Fruit"
+              options={OPTIONS}
+              value="Apple"
+              onChange={() => {}}
+              hasSearch
+            />
+          </InternationalizationProvider>,
         );
         await user.click(screen.getByRole('button', {name: 'Fruit'}));
         await user.type(screen.getByRole('combobox', h), 'xyz');
         await waitFor(() => {
-          expect(politeRegion()).toHaveTextContent('No results found');
+          expect(politeRegion()?.textContent).toBe('Aucun résultat');
         });
       });
 
