@@ -4,7 +4,8 @@
 
 /**
  * @file useSheetGestures.ts
- * @input Uses React (useCallback, useEffect, useMemo, useRef, useState)
+ * @input Uses React (useCallback, useEffect, useMemo, useRef, useState) and
+ *   the core useMediaQuery hook
  * @output Exports useSheetGestures hook and its option/result types
  * @position Internal to BottomSheet; not exported from the core entry point
  *
@@ -43,8 +44,10 @@ import {
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
   type UIEvent as ReactUIEvent,
 } from 'react';
+import {useMediaQuery} from '../hooks';
 import {
   computeDetentOffsets,
   isPeekOffset,
@@ -210,6 +213,13 @@ export interface UseSheetGesturesResult {
    * scrolling); normal scrolling passes through untouched.
    */
   bodyProps: SheetBodyProps;
+  /**
+   * The body element `bodyProps.ref` is attached to. The hook tracks the node
+   * anyway (it owns the non-passive touch listeners on it), so a host that
+   * also needs the element reads it here rather than wrapping `bodyProps.ref`
+   * in a second callback ref.
+   */
+  bodyElementRef: RefObject<HTMLElement | null>;
   /** Current live drag translate in px (0 = fully expanded, larger = collapsed). */
   dragOffset: number;
   /** Translate of the resting detent in px (0 = tallest detent). */
@@ -1066,8 +1076,10 @@ export function useSheetGestures({
     }
   }, []);
 
-  // eslint-disable-next-line @eslint-react/exhaustive-deps -- re-read the preference whenever the sheet opens
-  const reducedMotion = useMemo(() => prefersReducedMotion(), [isOpen]);
+  // Subscribed, not memoized: the preference can change while a sheet is open,
+  // and this branch decides whether the settle runs as a transition at all.
+  // The imperative gesture paths read prefersReducedMotion() directly.
+  const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
 
   const reconcileScrollPreservationInset = useCallback(
     (body: HTMLElement) => {
@@ -1165,6 +1177,7 @@ export function useSheetGestures({
     contentProps,
     handleProps,
     bodyProps,
+    bodyElementRef: bodyNodeRef,
     dragOffset,
     settledOffset,
     isDragging,

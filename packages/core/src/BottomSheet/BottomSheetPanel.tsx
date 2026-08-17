@@ -301,7 +301,6 @@ export function BottomSheetPanel({
   ...props
 }: BottomSheetPanelProps) {
   const elementRef = useRef<HTMLDivElement | null>(null);
-  const bodyElementRef = useRef<HTMLDivElement | null>(null);
   const previousStateRef = useRef(state);
   const reactivatedEntranceRef = useRef(false);
   const onMotionStartRef = useRef(onMotionStart);
@@ -336,6 +335,7 @@ export function BottomSheetPanel({
     contentProps,
     handleProps,
     bodyProps,
+    bodyElementRef,
     sheetRef,
     dragOffset,
     settledOffset,
@@ -361,14 +361,6 @@ export function BottomSheetPanel({
       onElementChange?.(element);
     },
     [onElementChange, sheetRef],
-  );
-  const setBodyElement = useCallback(
-    (element: HTMLDivElement | null) => {
-      bodyProps.ref(element);
-      bodyElementRef.current = element;
-    },
-    // eslint-disable-next-line @eslint-react/exhaustive-deps -- preserve the promoted Lab implementation
-    [bodyProps.ref],
   );
   useMobileKeyboard({
     bodyRef: bodyElementRef,
@@ -535,8 +527,7 @@ export function BottomSheetPanel({
             ? {style: {paddingBlockEnd: `${scrollPreservationInset}px`}}
             : {},
         )}
-        {...bodyProps}
-        ref={setBodyElement}>
+        {...bodyProps}>
         {children}
       </div>
     </div>
