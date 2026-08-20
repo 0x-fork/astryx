@@ -471,10 +471,18 @@ describe('Dialog', () => {
       );
       const dialog = screen.getByRole('dialog');
       const computed = window.getComputedStyle(dialog);
-      expect(computed.getPropertyValue('--container-padding-inline-start')).toBe('0px');
-      expect(computed.getPropertyValue('--container-padding-inline-end')).toBe('0px');
-      expect(computed.getPropertyValue('--container-padding-block-start')).toBe('0px');
-      expect(computed.getPropertyValue('--container-padding-block-end')).toBe('0px');
+      expect(
+        computed.getPropertyValue('--container-padding-inline-start'),
+      ).toBe('0px');
+      expect(computed.getPropertyValue('--container-padding-inline-end')).toBe(
+        '0px',
+      );
+      expect(computed.getPropertyValue('--container-padding-block-start')).toBe(
+        '0px',
+      );
+      expect(computed.getPropertyValue('--container-padding-block-end')).toBe(
+        '0px',
+      );
     });
   });
 });

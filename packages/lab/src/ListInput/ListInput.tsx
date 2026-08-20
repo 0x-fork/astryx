@@ -1640,10 +1640,9 @@ export function ListInput<T>({
                             })}
                             tooltip={
                               isDisabled || isLoading
-                                ? t(
-                                    '@astryx.listInput.removeUnavailable',
-                                    {itemName},
-                                  )
+                                ? t('@astryx.listInput.removeUnavailable', {
+                                    itemName,
+                                  })
                                 : t('@astryx.listInput.removeItem', {
                                     itemName,
                                     position: index + 1,
