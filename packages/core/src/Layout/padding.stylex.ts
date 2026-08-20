@@ -326,6 +326,120 @@ export const paddingBlockStyles = stylex.create({
 });
 
 /**
+ * Inline-start-only padding override styles.
+ * Use when a component needs to override the inline-start edge independently
+ * of inline-end. Logical, so it follows the writing direction (left in LTR,
+ * right in RTL).
+ */
+export const paddingInlineStartStyles = stylex.create({
+  0: {paddingInlineStart: spacingVars['--spacing-0']},
+  0.5: {paddingInlineStart: spacingVars['--spacing-0-5']},
+  1: {paddingInlineStart: spacingVars['--spacing-1']},
+  1.5: {paddingInlineStart: spacingVars['--spacing-1-5']},
+  2: {paddingInlineStart: spacingVars['--spacing-2']},
+  3: {paddingInlineStart: spacingVars['--spacing-3']},
+  4: {paddingInlineStart: spacingVars['--spacing-4']},
+  5: {paddingInlineStart: spacingVars['--spacing-5']},
+  6: {paddingInlineStart: spacingVars['--spacing-6']},
+  8: {paddingInlineStart: spacingVars['--spacing-8']},
+  10: {paddingInlineStart: spacingVars['--spacing-10']},
+});
+
+/**
+ * Inline-end-only padding override styles.
+ * The inline-end counterpart of paddingInlineStartStyles.
+ */
+export const paddingInlineEndStyles = stylex.create({
+  0: {paddingInlineEnd: spacingVars['--spacing-0']},
+  0.5: {paddingInlineEnd: spacingVars['--spacing-0-5']},
+  1: {paddingInlineEnd: spacingVars['--spacing-1']},
+  1.5: {paddingInlineEnd: spacingVars['--spacing-1-5']},
+  2: {paddingInlineEnd: spacingVars['--spacing-2']},
+  3: {paddingInlineEnd: spacingVars['--spacing-3']},
+  4: {paddingInlineEnd: spacingVars['--spacing-4']},
+  5: {paddingInlineEnd: spacingVars['--spacing-5']},
+  6: {paddingInlineEnd: spacingVars['--spacing-6']},
+  8: {paddingInlineEnd: spacingVars['--spacing-8']},
+  10: {paddingInlineEnd: spacingVars['--spacing-10']},
+});
+
+/**
+ * Container padding inline-start CSS variable style, set independently of
+ * inline-end so a per-edge override keeps edge-compensating children (Card,
+ * Divider, a nested Section) compensating against the padding actually
+ * applied on that edge.
+ */
+export const containerPaddingInlineStartVarStyles = stylex.create({
+  0: {'--container-padding-inline-start': spacingVars['--spacing-0']},
+  0.5: {'--container-padding-inline-start': spacingVars['--spacing-0-5']},
+  1: {'--container-padding-inline-start': spacingVars['--spacing-1']},
+  1.5: {'--container-padding-inline-start': spacingVars['--spacing-1-5']},
+  2: {'--container-padding-inline-start': spacingVars['--spacing-2']},
+  3: {'--container-padding-inline-start': spacingVars['--spacing-3']},
+  4: {'--container-padding-inline-start': spacingVars['--spacing-4']},
+  5: {'--container-padding-inline-start': spacingVars['--spacing-5']},
+  6: {'--container-padding-inline-start': spacingVars['--spacing-6']},
+  8: {'--container-padding-inline-start': spacingVars['--spacing-8']},
+  10: {'--container-padding-inline-start': spacingVars['--spacing-10']},
+});
+
+/**
+ * Container padding inline-end CSS variable style, the counterpart of
+ * containerPaddingInlineStartVarStyles.
+ */
+export const containerPaddingInlineEndVarStyles = stylex.create({
+  0: {'--container-padding-inline-end': spacingVars['--spacing-0']},
+  0.5: {'--container-padding-inline-end': spacingVars['--spacing-0-5']},
+  1: {'--container-padding-inline-end': spacingVars['--spacing-1']},
+  1.5: {'--container-padding-inline-end': spacingVars['--spacing-1-5']},
+  2: {'--container-padding-inline-end': spacingVars['--spacing-2']},
+  3: {'--container-padding-inline-end': spacingVars['--spacing-3']},
+  4: {'--container-padding-inline-end': spacingVars['--spacing-4']},
+  5: {'--container-padding-inline-end': spacingVars['--spacing-5']},
+  6: {'--container-padding-inline-end': spacingVars['--spacing-6']},
+  8: {'--container-padding-inline-end': spacingVars['--spacing-8']},
+  10: {'--container-padding-inline-end': spacingVars['--spacing-10']},
+});
+
+/**
+ * Block-start-only padding override styles.
+ * Use when a component needs to override the block-start (top) edge
+ * independently of block-end — e.g. a section that sits under a sticky
+ * header and needs less padding above than below.
+ */
+export const paddingBlockStartStyles = stylex.create({
+  0: {paddingBlockStart: spacingVars['--spacing-0']},
+  0.5: {paddingBlockStart: spacingVars['--spacing-0-5']},
+  1: {paddingBlockStart: spacingVars['--spacing-1']},
+  1.5: {paddingBlockStart: spacingVars['--spacing-1-5']},
+  2: {paddingBlockStart: spacingVars['--spacing-2']},
+  3: {paddingBlockStart: spacingVars['--spacing-3']},
+  4: {paddingBlockStart: spacingVars['--spacing-4']},
+  5: {paddingBlockStart: spacingVars['--spacing-5']},
+  6: {paddingBlockStart: spacingVars['--spacing-6']},
+  8: {paddingBlockStart: spacingVars['--spacing-8']},
+  10: {paddingBlockStart: spacingVars['--spacing-10']},
+});
+
+/**
+ * Block-end-only padding override styles.
+ * The block-end counterpart of paddingBlockStartStyles.
+ */
+export const paddingBlockEndStyles = stylex.create({
+  0: {paddingBlockEnd: spacingVars['--spacing-0']},
+  0.5: {paddingBlockEnd: spacingVars['--spacing-0-5']},
+  1: {paddingBlockEnd: spacingVars['--spacing-1']},
+  1.5: {paddingBlockEnd: spacingVars['--spacing-1-5']},
+  2: {paddingBlockEnd: spacingVars['--spacing-2']},
+  3: {paddingBlockEnd: spacingVars['--spacing-3']},
+  4: {paddingBlockEnd: spacingVars['--spacing-4']},
+  5: {paddingBlockEnd: spacingVars['--spacing-5']},
+  6: {paddingBlockEnd: spacingVars['--spacing-6']},
+  8: {paddingBlockEnd: spacingVars['--spacing-8']},
+  10: {paddingBlockEnd: spacingVars['--spacing-10']},
+});
+
+/**
  * Propagation styles for --astryx-section-padding.
  * When a parent section sets explicit padding, this propagates the value
  * through the CSS custom property cascade so nested sections that use
