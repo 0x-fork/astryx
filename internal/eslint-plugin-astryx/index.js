@@ -12,6 +12,7 @@
  * - no-style-only-wrapper: Disallows div/span wrappers that only style a single Astryx component (use xstyle)
  * - no-nullish-jsx-guard: Flags `!= null` JSX render guards for rendered values (use isRenderable so false/''/true slots don't leak an empty element)
  * - no-unguarded-ime-keydown: Flags an onKeyDown on an editable surface that branches on command keys without an IME composition guard (isImeKeyEvent/isComposing)
+ * - no-hover-on-disabled: Flags a :hover condition that can still match a disabled element (browsers suppress a disabled control's events, not its hover styling)
  *
  * Philosophy: Strict for agents (CI), lenient for humans (local dev)
  * - "strict" config: All rules as errors - use in CI/agent environments
@@ -34,6 +35,7 @@ import noBorderShorthandRule from './no-border-shorthand.js';
 import noPhysicalPropertiesRule from './no-physical-properties.js';
 import focusOutlineKeyboardOnlyRule from './focus-outline-keyboard-only.js';
 import focusOutlineSharedRule from './focus-outline-shared.js';
+import noHoverOnDisabledRule from './no-hover-on-disabled.js';
 import noReactNamespaceHooksRule from './no-react-namespace-hooks.js';
 import copyrightHeaderRule from './copyright-header.js';
 import noRawConsoleCliRule from './no-raw-console-cli.js';
@@ -257,6 +259,7 @@ const plugin = {
     'no-physical-properties': noPhysicalPropertiesRule,
     'focus-outline-keyboard-only': focusOutlineKeyboardOnlyRule,
     'focus-outline-shared': focusOutlineSharedRule,
+    'no-hover-on-disabled': noHoverOnDisabledRule,
     'no-react-namespace-hooks': noReactNamespaceHooksRule,
     'require-base-props': requireBasePropsRule,
     'require-ref-prop': requireRefPropRule,
@@ -309,6 +312,11 @@ plugin.configs.strict = {
     // Core and lab draw every ring from the shared utility; error so the one
     // themeable definition stays the only one.
     '@astryx/focus-outline-shared': 'error',
+    // A disabled control that lights up under the pointer promises a click it
+    // will not honour, and `:hover` matches a disabled element in every
+    // engine. Error in both tiers: core and lab are clean, and the fix is
+    // autofixable.
+    '@astryx/no-hover-on-disabled': 'error',
     '@astryx/no-react-namespace-hooks': 'error',
     '@astryx/require-base-props': 'error',
     '@astryx/require-ref-prop': 'error',
@@ -348,6 +356,11 @@ plugin.configs.recommended = {
     // Core and lab draw every ring from the shared utility; error so the one
     // themeable definition stays the only one.
     '@astryx/focus-outline-shared': 'error',
+    // A disabled control that lights up under the pointer promises a click it
+    // will not honour, and `:hover` matches a disabled element in every
+    // engine. Error in both tiers: core and lab are clean, and the fix is
+    // autofixable.
+    '@astryx/no-hover-on-disabled': 'error',
     '@astryx/no-react-namespace-hooks': 'error',
     '@astryx/require-base-props': 'warn',
     '@astryx/require-ref-prop': 'warn',
