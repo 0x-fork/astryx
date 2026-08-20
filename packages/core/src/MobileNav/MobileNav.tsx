@@ -23,6 +23,7 @@
  *
  * SYNC: When modified, update these files to stay in sync:
  * - /packages/core/src/MobileNav/index.ts (exports if types change)
+ * - /packages/core/src/hooks/scrollbarGutter.ts (shared scroll-lock gutter)
  * - /packages/cli/assets/templates/blocks/components/MobileNav/ (showcase blocks)
  */
 
@@ -47,6 +48,10 @@ import {Button} from '../Button';
 import {Icon} from '../Icon';
 import {Heading} from '../Heading/Heading';
 import {useAppShellMobile} from '../AppShell/AppShellMobileContext';
+import {
+  holdScrollbarGutter,
+  type ScrollbarGutterHold,
+} from '../hooks/scrollbarGutter';
 import {mergeProps, mergeRefs, composeEventHandlers} from '../utils';
 import type {BaseProps} from '../BaseProps';
 import {themeProps} from '../utils/themeProps';
@@ -433,6 +438,15 @@ export function MobileNav({
 
   const dialogRef = useRef<HTMLDialogElement>(null);
   const closeTimeoutRef = useRef<ReturnType<typeof setTimeout>>(null);
+  const gutterRef = useRef<ScrollbarGutterHold | null>(null);
+
+  // Gives back the gutter held open in place of the hidden scrollbar.
+  const releaseGutter = useCallback(() => {
+    if (gutterRef.current) {
+      gutterRef.current.release();
+      gutterRef.current = null;
+    }
+  }, []);
   // Resolved side — computed from trigger position when side='auto'
   const [resolvedSide, setResolvedSide] = useState<'start' | 'end'>(
     side === 'auto' ? 'end' : side,
@@ -475,6 +489,10 @@ export function MobileNav({
     }
 
     if (isOpen) {
+      // Taken first: every mutation below is one that can hide the scrollbar,
+      // and the gutter has to be measured while it is still there.
+      gutterRef.current ??= holdScrollbarGutter(document.documentElement);
+
       if (!dialog.open) {
         dialog.showModal();
       }
@@ -482,8 +500,10 @@ export function MobileNav({
       // overflow: clip avoids creating a scroll container (unlike hidden),
       // so there's no scroll bounce and no need to save/restore scroll position.
       document.documentElement.style.overflow = 'clip';
+      gutterRef.current.settle();
     } else if (dialog.open) {
       document.documentElement.style.overflow = '';
+      releaseGutter();
 
       closeTimeoutRef.current = setTimeout(() => {
         dialog.close();
@@ -496,8 +516,9 @@ export function MobileNav({
         closeTimeoutRef.current = null;
       }
       document.documentElement.style.overflow = '';
+      releaseGutter();
     };
-  }, [isOpen]);
+  }, [isOpen, releaseGutter]);
 
   // Close the native dialog on unmount if it's still open. Inside AppShell the
   // drawer is mounted in an <Activity> that switches to mode="hidden" when the
