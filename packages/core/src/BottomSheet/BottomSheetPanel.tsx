@@ -34,6 +34,7 @@ import * as stylex from '@stylexjs/stylex';
 import type {BaseProps} from '../BaseProps';
 import {useDevWarning} from '../hooks';
 import {
+  borderVars,
   colorVars,
   durationVars,
   easeVars,
@@ -112,6 +113,22 @@ const styles = stylex.create({
     width: '100%',
     maxWidth: 640,
     backgroundColor: colorVars['--color-background-surface'],
+    // Hairline on the three edges that face the scrim. The surface fill alone
+    // separates sheet from scrim in light mode, but not in dark: there the two
+    // sit within a few RGB steps of each other and the drop shadow is black on
+    // near-black, so the sheet's left and right edges disappear. Same
+    // treatment MobileNav gives its scrim-facing edge. The block-end edge is
+    // deliberately left bare; it sits below the viewport, under the overscroll
+    // padding.
+    borderBlockStartWidth: borderVars['--border-width'],
+    borderBlockStartStyle: 'solid',
+    borderBlockStartColor: colorVars['--color-border'],
+    borderInlineStartWidth: borderVars['--border-width'],
+    borderInlineStartStyle: 'solid',
+    borderInlineStartColor: colorVars['--color-border'],
+    borderInlineEndWidth: borderVars['--border-width'],
+    borderInlineEndStyle: 'solid',
+    borderInlineEndColor: colorVars['--color-border'],
     borderStartStartRadius: radiusVars['--radius-container'],
     borderStartEndRadius: radiusVars['--radius-container'],
     boxShadow: shadowVars['--shadow-high'],
@@ -175,6 +192,15 @@ const styles = stylex.create({
     overflowY: 'auto',
     overscrollBehavior: 'none',
     touchAction: 'pan-y',
+    // The scrolling area paints the surface itself, covering the sheet's whole
+    // inner box. Without it the sheet's edge is not uniform: a theme that packs
+    // an inset ring into --shadow-high (the bundled themes all add one in dark
+    // mode) draws that ring just inside the sheet, where an opaque content
+    // wrapper such as Section paints over it -- so the ring shows only in the
+    // gap below where the content ends, and the sheet's side edges appear to
+    // change width partway down. Painting the surface here hides the ring
+    // evenly, leaving the border below as the sheet's one edge.
+    backgroundColor: colorVars['--color-background-surface'],
     // No reserve for the handle bar: it floats, so the content starts at the
     // sheet's top edge and rides up under the pill. The pill is 4px centered
     // in a 24px band, so it occupies only 10-14px from the edge -- inside the
