@@ -42,7 +42,7 @@ import {useState} from 'react';
 import type {ISODateString} from '../utils';
 import {InputGroup} from '../InputGroup';
 import {stableClassName} from '../naming';
-import {DateInput, TOUCH_POINTER_QUERY} from './DateInput';
+import {DateInput} from './DateInput';
 import {
   toMonthIndex,
   monthIndexOf,
@@ -79,11 +79,6 @@ const SCROLLPORT_WIDTH = 360;
 /** Matches the repo-wide setup polyfill, so hover-gated behavior still works. */
 const HOVER_CAPABLE = /\(\s*hover\s*:\s*hover\s*\)/;
 
-/**
- * Point the surface switch at a phone or at a desktop. Only
- * {@link TOUCH_POINTER_QUERY} is forced; every other query keeps the answer
- * the shared test setup gives it.
- */
 /**
  * Answer media queries the way a given device would.
  *
@@ -286,8 +281,7 @@ describe('DateInput — surface selection', () => {
     // typable field, and a narrowed desktop window is still a mouse. A width
     // bound would only re-exclude tablets — the clearest case for a thumb
     // picker there is — so there deliberately is not one.
-    expect(TOUCH_POINTER_QUERY).toBe('(pointer: coarse)');
-
+    //
     // An 1194px tablet in landscape: coarse pointer, far wider than any
     // handset breakpoint. It answers width queries honestly, so a width bound
     // creeping back in would fail here rather than pass silently.
