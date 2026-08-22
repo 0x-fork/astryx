@@ -9,7 +9,7 @@
  * @position Package entry point for DateInput
  */
 
-export {DateInput} from './DateInput';
+export {DateInput, TOUCH_POINTER_QUERY} from './DateInput';
 export type {
   DateInputProps,
   DateInputSize,
