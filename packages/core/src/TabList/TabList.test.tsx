@@ -13,6 +13,7 @@ import {describe, it, expect, vi, beforeAll, afterAll} from 'vitest';
 import {render, screen, fireEvent} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {TabList} from './TabList';
+import type {TabListProps} from './TabList';
 import {Tab} from './Tab';
 import {TabMenu} from './TabMenu';
 import {LinkProvider} from '../Link/LinkProvider';
@@ -958,5 +959,354 @@ describe('TabMenu keyboard navigation (roving tabindex)', () => {
     hidePopover.mockClear();
     fireEvent.keyDown(menu, {key: 'Escape'});
     expect(hidePopover).toHaveBeenCalled();
+  });
+});
+
+describe('TabList overflow (scroll)', () => {
+  const STRIP = '.astryx-tab-strip';
+  const ARROW = '.astryx-tab-scroll-button';
+
+  /** jsdom has no layout, so the scroll box is described by hand. */
+  function fakeScrollBox(
+    strip: HTMLElement,
+    {
+      scrollWidth,
+      clientWidth,
+      scrollLeft = 0,
+    }: {scrollWidth: number; clientWidth: number; scrollLeft?: number},
+  ) {
+    Object.defineProperty(strip, 'scrollWidth', {
+      value: scrollWidth,
+      configurable: true,
+    });
+    Object.defineProperty(strip, 'clientWidth', {
+      value: clientWidth,
+      configurable: true,
+    });
+    Object.defineProperty(strip, 'scrollLeft', {
+      value: scrollLeft,
+      writable: true,
+      configurable: true,
+    });
+  }
+
+  /**
+   * Places the strip at 0..width and a tab at the given offsets, so the
+   * keep-selected-visible arithmetic has real numbers to work with.
+   */
+  function fakeGeometry(
+    strip: HTMLElement,
+    tabValue: string,
+    {
+      stripWidth,
+      tabLeft,
+      tabRight,
+    }: {stripWidth: number; tabLeft: number; tabRight: number},
+  ) {
+    strip.getBoundingClientRect = () =>
+      ({left: 0, right: stripWidth, width: stripWidth}) as DOMRect;
+    const tab = strip.querySelector<HTMLElement>(
+      `[data-tab-value="${tabValue}"]`,
+    );
+    if (tab) {
+      tab.getBoundingClientRect = () =>
+        ({
+          left: tabLeft,
+          right: tabRight,
+          width: tabRight - tabLeft,
+        }) as DOMRect;
+    }
+  }
+
+  function renderStrip(props: Partial<TabListProps> = {}) {
+    const utils = render(
+      <TabList value="a" onChange={() => {}} {...props}>
+        <Tab value="a" label="Alpha" />
+        <Tab value="b" label="Beta" />
+        <Tab value="c" label="Gamma" />
+      </TabList>,
+    );
+    const strip = utils.container.querySelector<HTMLElement>(STRIP);
+    if (!strip) {
+      throw new Error('no tab strip');
+    }
+    return {...utils, strip};
+  }
+
+  it('renders the tabs inside a scroll strip by default', () => {
+    const {strip} = renderStrip();
+    expect(strip.querySelectorAll('[data-tab-value]')).toHaveLength(3);
+  });
+
+  it('offers an end arrow while there are tabs past the end, and pressing it scrolls', () => {
+    const {container, strip} = renderStrip();
+    fakeScrollBox(strip, {scrollWidth: 600, clientWidth: 300});
+    const scrollBy = vi.fn();
+    strip.scrollBy = scrollBy;
+    fireEvent.scroll(strip);
+
+    const arrows = container.querySelectorAll(ARROW);
+    expect(arrows).toHaveLength(1);
+
+    fireEvent.click(arrows[0]);
+    expect(scrollBy).toHaveBeenCalledWith({left: 240});
+  });
+
+  it('offers both arrows once the strip is scrolled away from the start', () => {
+    const {container, strip} = renderStrip();
+    fakeScrollBox(strip, {scrollWidth: 600, clientWidth: 300, scrollLeft: 150});
+    strip.scrollBy = vi.fn();
+    fireEvent.scroll(strip);
+
+    expect(container.querySelectorAll(ARROW)).toHaveLength(2);
+  });
+
+  it('keeps the arrows out of the tab order and out of the accessibility tree', () => {
+    const {container, strip} = renderStrip();
+    fakeScrollBox(strip, {scrollWidth: 600, clientWidth: 300});
+    strip.scrollBy = vi.fn();
+    fireEvent.scroll(strip);
+
+    const arrow = container.querySelector<HTMLElement>(ARROW);
+    expect(arrow?.getAttribute('aria-hidden')).toBe('true');
+    expect(arrow?.tabIndex).toBe(-1);
+  });
+
+  it('scrolls a selected tab that starts out of view back into view on mount', () => {
+    const scrollBy = vi.fn();
+    // The strip mounts before the effect runs, so the geometry has to be in
+    // place on the prototype rather than on an element we can reach first.
+    const originalScrollBy = Element.prototype.scrollBy;
+    const originalRect = Element.prototype.getBoundingClientRect;
+    Element.prototype.scrollBy = scrollBy;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      return (
+        this.classList.contains('astryx-tab-strip')
+          ? {left: 0, right: 300, width: 300}
+          : {left: 420, right: 500, width: 80}
+      ) as DOMRect;
+    };
+
+    render(
+      <TabList value="c" onChange={() => {}}>
+        <Tab value="a" label="Alpha" />
+        <Tab value="b" label="Beta" />
+        <Tab value="c" label="Gamma" />
+      </TabList>,
+    );
+
+    expect(scrollBy).toHaveBeenCalledWith(
+      expect.objectContaining({behavior: 'instant'}),
+    );
+    expect(scrollBy.mock.calls[0][0].left).toBeGreaterThan(0);
+    Element.prototype.scrollBy = originalScrollBy;
+    Element.prototype.getBoundingClientRect = originalRect;
+  });
+
+  it('keeps the selected tab in view when the host changes value without focus', () => {
+    const {strip, rerender} = renderStrip({value: 'a'});
+    const scrollBy = vi.fn();
+    strip.scrollBy = scrollBy;
+    fakeGeometry(strip, 'c', {stripWidth: 300, tabLeft: 420, tabRight: 500});
+
+    rerender(
+      <TabList value="c" onChange={() => {}}>
+        <Tab value="a" label="Alpha" />
+        <Tab value="b" label="Beta" />
+        <Tab value="c" label="Gamma" />
+      </TabList>,
+    );
+
+    expect(scrollBy).toHaveBeenCalledTimes(1);
+    expect(scrollBy.mock.calls[0][0].left).toBeGreaterThan(0);
+  });
+
+  it('leaves a tab that is already in view alone', () => {
+    const {strip, rerender} = renderStrip({value: 'a'});
+    const scrollBy = vi.fn();
+    strip.scrollBy = scrollBy;
+    fakeGeometry(strip, 'b', {stripWidth: 300, tabLeft: 80, tabRight: 140});
+
+    rerender(
+      <TabList value="b" onChange={() => {}}>
+        <Tab value="a" label="Alpha" />
+        <Tab value="b" label="Beta" />
+        <Tab value="c" label="Gamma" />
+      </TabList>,
+    );
+
+    expect(scrollBy).not.toHaveBeenCalled();
+  });
+
+  it('reveals on a selection change, not on an unrelated overflow change', () => {
+    const {strip, rerender} = renderStrip({value: 'c', overflow: 'visible'});
+    const scrollBy = vi.fn();
+    strip.scrollBy = scrollBy;
+    fakeGeometry(strip, 'c', {stripWidth: 300, tabLeft: 420, tabRight: 500});
+
+    // Turning scrolling on re-measures the strip, and that one reveal is the
+    // resize path's. The selection has not moved, so nothing may add a second.
+    rerender(
+      <TabList value="c" onChange={() => {}} overflow="scroll">
+        <Tab value="a" label="Alpha" />
+        <Tab value="b" label="Beta" />
+        <Tab value="c" label="Gamma" />
+      </TabList>,
+    );
+
+    expect(scrollBy).toHaveBeenCalledTimes(1);
+
+    fakeGeometry(strip, 'a', {stripWidth: 300, tabLeft: -200, tabRight: -120});
+    rerender(
+      <TabList value="a" onChange={() => {}} overflow="scroll">
+        <Tab value="a" label="Alpha" />
+        <Tab value="b" label="Beta" />
+        <Tab value="c" label="Gamma" />
+      </TabList>,
+    );
+
+    expect(scrollBy).toHaveBeenCalledTimes(2);
+    expect(scrollBy.mock.calls[1][0].left).toBeLessThan(0);
+  });
+
+  it('finishes the job on focus: a tab only half in view is scrolled clear', () => {
+    const {strip} = renderStrip({value: 'a'});
+    const scrollBy = vi.fn();
+    strip.scrollBy = scrollBy;
+    // The browser scrolls a focused tab into view only when it is entirely
+    // outside the box, so this one — straddling the end edge — stays cut off.
+    fakeGeometry(strip, 'c', {stripWidth: 300, tabLeft: 260, tabRight: 340});
+
+    const tab = strip.querySelector<HTMLElement>('[data-tab-value="c"]');
+    fireEvent.focus(tab!, {bubbles: true});
+
+    expect(scrollBy).toHaveBeenCalledTimes(1);
+    expect(scrollBy.mock.calls[0][0].left).toBeCloseTo(40);
+  });
+
+  it('reveals a half-visible overflow menu trigger too, not just tabs', () => {
+    const {container} = render(
+      <TabList value="a" onChange={() => {}}>
+        <Tab value="a" label="Alpha" />
+        <Tab value="b" label="Beta" />
+        <TabMenu label="More" options={[{value: 'c', label: 'Gamma'}]} />
+      </TabList>,
+    );
+    const strip = container.querySelector<HTMLElement>(STRIP);
+    if (!strip) {
+      throw new Error('no tab strip');
+    }
+    const scrollBy = vi.fn();
+    strip.scrollBy = scrollBy;
+    strip.getBoundingClientRect = () =>
+      ({left: 0, right: 300, width: 300}) as DOMRect;
+    const trigger = strip.querySelector<HTMLElement>('[data-tab-menu]');
+    if (!trigger) {
+      throw new Error('no menu trigger');
+    }
+    trigger.getBoundingClientRect = () =>
+      ({left: 260, right: 340, width: 80}) as DOMRect;
+
+    fireEvent.focus(trigger, {bubbles: true});
+
+    expect(scrollBy).toHaveBeenCalledTimes(1);
+    expect(scrollBy.mock.calls[0][0].left).toBeCloseTo(40);
+  });
+
+  it('fades out at the strip’s own edge, not at the bleed edge', () => {
+    // The scroll box is a ring-bleed wider than the TabList on each side while
+    // it holds focus, so a fade that ran to the box edge would paint tabs
+    // outside the component and past the arrow that caps that edge.
+    const bleed = 'var(--_tab-strip-bleed)';
+    const {strip} = renderStrip();
+    strip.scrollBy = vi.fn();
+
+    fakeScrollBox(strip, {scrollWidth: 600, clientWidth: 300});
+    fireEvent.scroll(strip);
+    expect(getComputedStyle(strip).maskImage).toContain(`transparent ${bleed}`);
+
+    fakeScrollBox(strip, {scrollWidth: 600, clientWidth: 300, scrollLeft: 150});
+    fireEvent.scroll(strip);
+    expect(getComputedStyle(strip).maskImage).toContain(
+      `transparent calc(100% - ${bleed})`,
+    );
+  });
+
+  it('is no wider than the TabList until the strip holds focus', () => {
+    // The bleed is real geometry: while the strip carries it, its border box
+    // sticks out of the TabList's and every ancestor that scrolls counts it.
+    // jsdom has no layout, so the box is read off the declarations: padding
+    // and its cancelling margin are both the bleed, and the bleed is zero
+    // until a ring needs keeping whole. `:has(:focus-visible)` flips it --
+    // covered in a browser, since jsdom does not recompute style on a focus
+    // change.
+    const {strip} = renderStrip();
+    const cs = getComputedStyle(strip);
+
+    expect(cs.getPropertyValue('--_tab-strip-bleed')).toBe('0px');
+    expect(cs.paddingInline).toBe('var(--_tab-strip-bleed)');
+    expect(cs.marginInline).toBe('calc(-1 * (var(--_tab-strip-bleed)))');
+  });
+
+  it('does not hand focus to an arrow, which is hidden from assistive tech', () => {
+    const {container, strip} = renderStrip();
+    fakeScrollBox(strip, {scrollWidth: 600, clientWidth: 300});
+    strip.scrollBy = vi.fn();
+    fireEvent.scroll(strip);
+
+    const arrow = container.querySelector<HTMLElement>(ARROW);
+    const prevented = !fireEvent.mouseDown(arrow!);
+    expect(prevented).toBe(true);
+  });
+
+  it('overflow="visible" scrolls nothing and offers no arrows', () => {
+    const {container, strip, rerender} = renderStrip({
+      value: 'a',
+      overflow: 'visible',
+    });
+    const scrollBy = vi.fn();
+    strip.scrollBy = scrollBy;
+    fakeScrollBox(strip, {scrollWidth: 600, clientWidth: 300});
+    fakeGeometry(strip, 'c', {stripWidth: 300, tabLeft: 420, tabRight: 500});
+    fireEvent.scroll(strip);
+
+    rerender(
+      <TabList value="c" onChange={() => {}} overflow="visible">
+        <Tab value="a" label="Alpha" />
+        <Tab value="b" label="Beta" />
+        <Tab value="c" label="Gamma" />
+      </TabList>,
+    );
+
+    expect(container.querySelectorAll(ARROW)).toHaveLength(0);
+    expect(scrollBy).not.toHaveBeenCalled();
+  });
+
+  it('shows the reading start of a stop too wide to fit', () => {
+    const {strip} = renderStrip({value: 'a'});
+    const scrollBy = vi.fn();
+    strip.scrollBy = scrollBy;
+    // Wider than the strip, so one end stays hidden either way. Aligning the
+    // end would land a long label on its last words.
+    fakeGeometry(strip, 'c', {stripWidth: 300, tabLeft: 420, tabRight: 800});
+
+    const tab = strip.querySelector<HTMLElement>('[data-tab-value="c"]');
+    fireEvent.focus(tab!, {bubbles: true});
+
+    expect(scrollBy.mock.calls[0][0].left).toBeCloseTo(420);
+  });
+
+  it('shows the reading start of an over-wide stop in RTL too', () => {
+    const {strip} = renderStrip({value: 'a'});
+    const scrollBy = vi.fn();
+    strip.scrollBy = scrollBy;
+    strip.style.direction = 'rtl';
+    fakeGeometry(strip, 'c', {stripWidth: 300, tabLeft: -500, tabRight: -120});
+
+    const tab = strip.querySelector<HTMLElement>('[data-tab-value="c"]');
+    fireEvent.focus(tab!, {bubbles: true});
+
+    // RTL reads from the right edge, so that is the end to bring flush.
+    expect(scrollBy.mock.calls[0][0].left).toBeCloseTo(-420);
   });
 });
