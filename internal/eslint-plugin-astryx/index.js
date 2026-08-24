@@ -15,6 +15,7 @@
  * - no-unguarded-ime-keydown: Flags an onKeyDown on an editable surface that branches on command keys without an IME composition guard (isImeKeyEvent/isComposing)
  * - no-classname-clobber: Flags two className sources on one JSX element — a literal className/style beside {...stylex.props()}, or two spreads that each carry a className (the later one silently wins)
  * - no-hover-on-disabled: Flags a :hover condition that can still match a disabled element (browsers suppress a disabled control's events, not its hover styling)
+ * - require-table-section: Requires TableRow/tr to sit inside TableHeader/TableBody/TableFooter (a row directly inside a table emits <table><tr>, which browsers repair on parse and React does not)
  * - disabled-cursor: Flags a cursor that promises an interaction without giving way to not-allowed on a disabled element
  *
  * Philosophy: Strict for agents (CI), lenient for humans (local dev)
@@ -48,6 +49,7 @@ import requireBasePropsRule from './require-base-props.js';
 import requireRefPropRule from './require-ref-prop.js';
 import noHardcodedI18nStringRule from './no-hardcoded-i18n-string.js';
 import i18nKeyFormatRule from './i18n-key-format.js';
+import requireTableSectionRule from './require-table-section.js';
 
 // =============================================================================
 // Rule: no-hardcoded-styles
@@ -274,6 +276,7 @@ const plugin = {
     'no-raw-console-cli': noRawConsoleCliRule,
     'no-hardcoded-i18n-string': noHardcodedI18nStringRule,
     'i18n-key-format': i18nKeyFormatRule,
+    'require-table-section': requireTableSectionRule,
   },
   configs: {},
 };
@@ -340,6 +343,9 @@ plugin.configs.strict = {
     '@astryx/copyright-header': 'error',
     '@astryx/no-hardcoded-i18n-string': 'error',
     '@astryx/i18n-key-format': 'error',
+    // A row directly inside a table is invalid DOM and hydration-unsafe, and
+    // the repo is clean — error in both tiers so it stays that way (#5277).
+    '@astryx/require-table-section': 'error',
   },
 };
 
@@ -394,6 +400,9 @@ plugin.configs.recommended = {
     '@astryx/copyright-header': 'error',
     '@astryx/no-hardcoded-i18n-string': 'warn',
     '@astryx/i18n-key-format': 'warn',
+    // A row directly inside a table is invalid DOM and hydration-unsafe, and
+    // the repo is clean — error in both tiers so it stays that way (#5277).
+    '@astryx/require-table-section': 'error',
   },
 };
 
