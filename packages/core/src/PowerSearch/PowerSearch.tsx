@@ -79,6 +79,14 @@ import {useMergedRefs} from '../hooks/useMergedRefs';
 // Icon mapping for typeahead entries
 // =============================================================================
 
+// Ranked suggestions shown for a non-empty query. The field list itself is
+// never capped -- see the maxSearchResults prop.
+const DEFAULT_MAX_SEARCH_RESULTS = 10;
+
+// Empty-query browsing gets a high safety ceiling, matching XDS. This shows
+// every practical field list without allowing an accidental unbounded DOM.
+const MAX_BROWSE_MENU_ITEMS = 1000;
+
 const OPERATOR_VALUE_TYPE_TO_ICON: Record<string, IconName> = {
   string: 'search',
   string_list: 'search',
@@ -408,6 +416,12 @@ export interface PowerSearchProps extends Omit<
   maxTokenLength?: number;
   /** Max suggestions in string and entity value typeaheads. @default 10 */
   maxOperatorMenuItems?: number;
+  /**
+   * Max ranked results shown for a non-empty query. This does not affect the
+   * value editor shown after selecting a field. Browsing the field list with
+   * an empty query shows up to 1,000 fields. @default 10
+   */
+  maxSearchResults?: number;
   /** Label for the save button in edit popover. @default 'Apply' */
   popoverSaveButtonLabel?: string;
   /** Timezone ID for date formatting. */
@@ -549,6 +563,7 @@ export function PowerSearch({
   statusVariant = 'attached',
   maxTokenLength = 40,
   maxOperatorMenuItems,
+  maxSearchResults = DEFAULT_MAX_SEARCH_RESULTS,
   popoverSaveButtonLabel: popoverSaveButtonLabelFromProps,
   timezoneID,
   tokenOverflowBehavior,
@@ -565,7 +580,7 @@ export function PowerSearch({
 }: PowerSearchProps) {
   const size = useSize(sizeProp, 'md');
   const config = useInternalConfig(configProp);
-  const searchSource = usePowerSearchSource(config);
+  const searchSource = usePowerSearchSource(config, maxSearchResults);
   const t = useTranslator();
   const locale = useLocale();
   const label = labelFromProps ?? t('@astryx.powersearch.label');
@@ -1051,6 +1066,7 @@ export function PowerSearch({
           onChange={handleTokenizerChange}
           renderToken={renderToken}
           renderItem={renderItem}
+          maxMenuItems={MAX_BROWSE_MENU_ITEMS}
           placeholder={filters.length === 0 ? placeholder : ''}
           hasAutoFocus={hasAutoFocus}
           hasClear={hasClear && !isReadOnly}
