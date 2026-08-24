@@ -57,7 +57,7 @@ import {
   holdScrollbarGutter,
   type ScrollbarGutterHold,
 } from '../hooks/scrollbarGutter';
-import {mergeProps, mergeRefs, composeEventHandlers} from '../utils';
+import {mergeProps, composeEventHandlers} from '../utils';
 import {overlayPaddingReset} from '../Layout/padding.stylex';
 import {LayerDepthProvider} from '../Layer/LayerDepthContext';
 import {useLayerDismissal} from '../Layer/useLayerDismissal';
@@ -65,6 +65,7 @@ import type {BaseProps} from '../BaseProps';
 import {themeProps} from '../utils/themeProps';
 import {useTranslator} from '../i18n';
 
+import {useMergedRefs} from '../hooks/useMergedRefs';
 // =============================================================================
 // Styles
 // =============================================================================
@@ -583,7 +584,7 @@ export function MobileNav({
 
   return (
     <dialog
-      ref={mergeRefs(ref, dialogRef)}
+      ref={useMergedRefs(ref, dialogRef)}
       id={dialogId}
       {...mergeProps(
         themeProps('mobile-nav', {side: resolvedSide}),

@@ -33,7 +33,7 @@ import {IconButton} from '../IconButton';
 import {useAnnounce} from '../hooks/useAnnounce';
 import {useScrollLock} from '../hooks/useScrollLock';
 import {useIsomorphicLayoutEffect} from '../hooks/useIsomorphicLayoutEffect';
-import {mergeProps, mergeRefs, rtlStyles} from '../utils';
+import {mergeProps, rtlStyles} from '../utils';
 import type {BaseProps} from '../BaseProps';
 import {themeProps} from '../utils/themeProps';
 import {focusOutlineStyles} from '../utils/focusOutline.stylex';
@@ -42,6 +42,7 @@ import {LayerDepthProvider} from '../Layer/LayerDepthContext';
 import {useLayerDismissal} from '../Layer/useLayerDismissal';
 import {useTranslator} from '../i18n';
 
+import {useMergedRefs} from '../hooks/useMergedRefs';
 /**
  * Media type for lightbox items.
  */
@@ -318,6 +319,7 @@ export function Lightbox({
 }: LightboxProps) {
   const t = useTranslator();
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const mergedDialogRef = useMergedRefs(ref, dialogRef);
   const containerRef = useRef<HTMLDivElement>(null);
   const imageWrapperRef = useRef<HTMLDivElement>(null);
   const triggerElementRef = useRef<Element | null>(null);
@@ -601,7 +603,7 @@ export function Lightbox({
 
   return (
     <dialog
-      ref={mergeRefs(ref, dialogRef)}
+      ref={mergedDialogRef}
       onCancel={handleCancel}
       onClick={e => {
         handleBackdropClick(e);
