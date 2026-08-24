@@ -609,6 +609,13 @@ export interface MultiSelectorProps<
   triggerDisplay?: 'count' | 'labels' | 'badges';
 
   /**
+   * Formats the trigger text when triggerDisplay is 'count'.
+   * Receives the number of selected values and returns the full trigger text.
+   * @default count => `${count} selected`
+   */
+  formatTriggerCount?: (count: number) => string;
+
+  /**
    * Maximum number of badges to show before showing "+N".
    * Only used when triggerDisplay is 'badges'.
    * @default 3
@@ -711,6 +718,7 @@ export function MultiSelector<T extends MultiSelectorOptionType>({
   hasSearch = false,
   searchPlaceholder: searchPlaceholderFromProps,
   triggerDisplay = 'count',
+  formatTriggerCount,
   maxBadges = 3,
   renderOption,
   indicatorPosition = 'start',
@@ -1123,7 +1131,8 @@ export function MultiSelector<T extends MultiSelectorOptionType>({
       case 'count':
         return (
           <span {...stylex.props(styles.triggerText)}>
-            {optimisticValue.length} selected
+            {formatTriggerCount?.(optimisticValue.length) ??
+              `${optimisticValue.length} selected`}
           </span>
         );
 
@@ -1154,7 +1163,14 @@ export function MultiSelector<T extends MultiSelectorOptionType>({
         );
       }
     }
-  }, [optimisticValue, triggerDisplay, selectedLabels, placeholder, maxBadges]);
+  }, [
+    optimisticValue,
+    triggerDisplay,
+    selectedLabels,
+    placeholder,
+    formatTriggerCount,
+    maxBadges,
+  ]);
 
   // Render search input
   const renderSearch = useCallback(() => {
