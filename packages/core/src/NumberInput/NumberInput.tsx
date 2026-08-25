@@ -351,10 +351,12 @@ interface NumberInputPropsBase extends Omit<
   autoComplete?: string;
   /**
    * The minimum value allowed.
+   * A smaller entry commits at this value on blur or Enter.
    */
   min?: number | null;
   /**
    * The maximum value allowed.
+   * A larger entry commits at this value on blur or Enter.
    */
   max?: number | null;
   /**
@@ -429,15 +431,12 @@ export type NumberInputProps =
   NumberInputPropsNonClearable | NumberInputPropsClearable;
 
 /**
- * Read the typed or pasted text as a number, then apply the field's
- * constraints.
- * Returns null if the input is not a valid number or fails validation.
+ * Read the typed or pasted text as a number, applying the shape rules (finite,
+ * and integral when `isIntegerOnly`) but not the min/max range.
  */
-function parseNumberInput(
+function parseNumericInput(
   input: string,
   options: {
-    min?: number | null;
-    max?: number | null;
     isIntegerOnly?: boolean;
     locale?: Locale;
   },
@@ -452,8 +451,28 @@ function parseNumberInput(
     return null;
   }
 
-  // Check integer constraint
   if (options.isIntegerOnly && !Number.isInteger(num)) {
+    return null;
+  }
+
+  return num;
+}
+
+/**
+ * Parse and validate a string input as a number.
+ * Returns null if the input is not a valid number or fails validation.
+ */
+function parseNumberInput(
+  input: string,
+  options: {
+    min?: number | null;
+    max?: number | null;
+    isIntegerOnly?: boolean;
+    locale?: Locale;
+  },
+): number | null {
+  const num = parseNumericInput(input, options);
+  if (num === null) {
     return null;
   }
 
@@ -468,6 +487,65 @@ function parseNumberInput(
   }
 
   return num;
+}
+
+/**
+ * Parse a string input for commit (blur/Enter), clamping an out-of-range
+ * number to the nearest bound.
+ *
+ * Rejecting an out-of-range entry outright leaves the last in-range prefix
+ * committed, so typing 100 into a [1, 2] field lands on 1; the nearest bound
+ * is what the entry actually asked for.
+ */
+function parseNumberInputForCommit(
+  input: string,
+  options: {
+    min?: number | null;
+    max?: number | null;
+    isIntegerOnly?: boolean;
+    locale?: Locale;
+  },
+): number | null {
+  const num = parseNumericInput(input, options);
+  if (num === null) {
+    return null;
+  }
+
+  // The bound itself has to satisfy the field's own shape rule, or an
+  // integer-only field commits the fractional `max` it was handed. Round
+  // inwards, the same way stepping from empty does.
+  const {min, max} = getCommittableBounds(options);
+  // No number satisfies both, so there is nothing to clamp to.
+  if (min != null && max != null && min > max) {
+    return null;
+  }
+
+  if (min != null && num < min) {
+    return min;
+  }
+  if (max != null && num > max) {
+    return max;
+  }
+
+  return num;
+}
+
+function getCommittableBounds({
+  min,
+  max,
+  isIntegerOnly,
+}: {
+  min?: number | null;
+  max?: number | null;
+  isIntegerOnly?: boolean;
+}): {min: number | null; max: number | null} {
+  if (!isIntegerOnly) {
+    return {min: min ?? null, max: max ?? null};
+  }
+  return {
+    min: min == null ? null : Math.ceil(min),
+    max: max == null ? null : Math.floor(max),
+  };
 }
 
 type StepDirection = -1 | 1;
@@ -664,6 +742,17 @@ export function NumberInput({
     [isIntegerOnly, locale, max, min],
   );
 
+  const parseInputForCommit = useCallback(
+    (text: string) =>
+      parseNumberInputForCommit(text, {min, max, isIntegerOnly, locale}),
+    [isIntegerOnly, locale, max, min],
+  );
+
+  const parseNumeric = useCallback(
+    (text: string) => parseNumericInput(text, {isIntegerOnly, locale}),
+    [isIntegerOnly, locale],
+  );
+
   const formattedValue = useMemo(() => {
     if (value == null) {
       return '';
@@ -732,7 +821,7 @@ export function NumberInput({
             onChange(null);
           }
         } else {
-          const parsed = parseInput(pendingInput);
+          const parsed = parseInputForCommit(pendingInput);
           if (parsed !== null && parsed !== value) {
             onChange(parsed);
           }
@@ -744,7 +833,7 @@ export function NumberInput({
       setIsFocused(false);
       onBlur?.(e);
     },
-    [pendingInput, value, onChange, parseInput, onBlur, hasClear],
+    [pendingInput, value, onChange, parseInputForCommit, onBlur, hasClear],
   );
 
   const valueForStepping = useMemo(() => {
@@ -820,9 +909,16 @@ export function NumberInput({
               onChange(null);
             }
           } else {
-            const parsed = parseInput(pendingInput);
-            if (parsed !== null && parsed !== value) {
-              onChange(parsed);
+            const parsed = parseInputForCommit(pendingInput);
+            if (parsed !== null) {
+              // Enter otherwise keeps the pending text, which would leave a
+              // clamped entry showing the number that was not committed.
+              if (parsed !== parseNumeric(pendingInput)) {
+                setPendingInput(null);
+              }
+              if (parsed !== value) {
+                onChange(parsed);
+              }
             }
           }
         }
@@ -834,7 +930,8 @@ export function NumberInput({
       pendingInput,
       value,
       onChange,
-      parseInput,
+      parseInputForCommit,
+      parseNumeric,
       onEnter,
       onKeyDown,
       hasClear,
