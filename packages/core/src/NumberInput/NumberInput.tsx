@@ -51,6 +51,7 @@ import {Icon, renderIconSlot, type IconType} from '../Icon';
 import {VisuallyHidden} from '../VisuallyHidden';
 import {useTooltip} from '../Tooltip';
 import {getInputARIA} from '../utils';
+import {interactionOverlayStyles} from '../utils/interactionOverlay.stylex';
 import {useSize} from '../SizeContext/SizeContext';
 import {useInputContainer} from '../hooks/useInputContainer';
 import {useInputStatusIcon} from '../hooks/useInputStatusIcon';
@@ -161,13 +162,6 @@ const styles = stylex.create({
     borderStyle: 'none',
     color: colorVars['--color-icon-secondary'],
     backgroundColor: colorVars['--color-background-surface'],
-    backgroundImage: {
-      default: null,
-      ':hover:where(:not(:disabled,[aria-disabled="true"]))': {
-        '@media (hover: hover)': `linear-gradient(${colorVars['--color-overlay-hover']}, ${colorVars['--color-overlay-hover']})`,
-      },
-      ':active': `linear-gradient(${colorVars['--color-overlay-pressed']}, ${colorVars['--color-overlay-pressed']})`,
-    },
     cursor: {
       default: 'pointer',
       ':is(:disabled,[aria-disabled="true"])': 'default',
@@ -970,6 +964,7 @@ export function NumberInput({
             }}
             {...stylex.props(
               styles.numberStepperButton,
+              interactionOverlayStyles.backgroundImage,
               (isDisabled || isReadOnly || !canIncrement) &&
                 styles.numberStepperButtonDisabled,
             )}>
@@ -992,6 +987,7 @@ export function NumberInput({
             }}
             {...stylex.props(
               styles.numberStepperButton,
+              interactionOverlayStyles.backgroundImage,
               styles.decrementButton,
               (isDisabled || isReadOnly || !canDecrement) &&
                 styles.numberStepperButtonDisabled,
