@@ -78,5 +78,27 @@
       "prev": "button[aria-label=\"Previous\"]",
       "next": "button[aria-label=\"Next\"]"
     }
+  },
+  {
+    "component": "Typeahead",
+    "storyId": "core-typeahead--logical-order",
+    "dims": [
+      "D2"
+    ],
+    "selectors": {
+      "prev": ".astryx-token",
+      "next": ".astryx-input-clear-button"
+    }
+  },
+  {
+    "component": "Tokenizer",
+    "storyId": "core-tokenizer--logical-order",
+    "dims": [
+      "D2"
+    ],
+    "selectors": {
+      "prev": ".astryx-token",
+      "next": ".astryx-input-clear-button"
+    }
   }
 ]
