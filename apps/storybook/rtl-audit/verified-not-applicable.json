@@ -14,5 +14,9 @@
   {
     "component": "core/Text",
     "reason": "Text sets typography — size, weight, colour, line-height, wrapping, truncation — and nothing else. Its one alignment prop is `justify`, which compiles to the logical `text-align: start | center | end` and defaults to `start`, so text hangs off the correct edge in either direction without a component-side branch. Truncation is `text-overflow: ellipsis` and `-webkit-line-clamp`, both of which put the ellipsis at the reading end on their own, and the tooltip that accompanies a clamped string is placed with the logical `above`/`below`/`start`/`end` vocabulary. Nothing is positioned, nothing is transformed, and the component renders no glyph, separator, or control."
+  },
+  {
+    "component": "core/Timestamp",
+    "reason": "Timestamp renders locale-formatted text and a direction-neutral hover card; it has no directional icons, contextual decorations, side-specific layout, order, scroll, drag, or directional keyboard behavior."
   }
 ]
