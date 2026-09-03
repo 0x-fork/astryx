@@ -108,3 +108,43 @@ describe('build API', () => {
     expect(r.data.domain).toHaveLength(0);
   });
 });
+
+describe('build kit — coverage gates the pages group', () => {
+  it('never offers a page that answered less than half the query', async () => {
+    const r = await build('actionable warning banner', {cwd: REPO});
+    expect(r.type).toBe('build.kit');
+    if (r.type !== 'build.kit') return;
+    for (const p of r.data.pages) {
+      expect(p.matchedTerms / p.queryTerms).toBeGreaterThanOrEqual(0.5);
+    }
+  });
+
+  it('does not call a one-word coincidence a direct match', async () => {
+    // A page's keywords include every component its source renders, so any
+    // page that happens to render a Banner keyword-matched "banner" at 90 —
+    // which, plus the coverage garnish, landed exactly on PAGE_DIRECT. Three
+    // pages that are not warnings were presented as a confident direct match.
+    const r = await build('actionable warning banner', {cwd: REPO});
+    expect(r.type).toBe('build.kit');
+    if (r.type !== 'build.kit') return;
+    expect(r.data.directMatch).toBe(false);
+    for (const p of r.data.pages) {
+      expect(['login', 'contact-form', 'documentation-design']).not.toContain(p.name);
+    }
+  });
+
+  it('still reports a direct match when the page really does answer the query', async () => {
+    const r = await build('contact form', {cwd: REPO});
+    expect(r.type).toBe('build.kit');
+    if (r.type !== 'build.kit') return;
+    expect(r.data.directMatch).toBe(true);
+    expect(r.data.pages[0].matchedTerms).toBe(r.data.pages[0].queryTerms);
+  });
+
+  it('leaves single-concept queries alone (nothing to cover)', async () => {
+    const r = await build('dashboard', {cwd: REPO});
+    expect(r.type).toBe('build.kit');
+    if (r.type !== 'build.kit') return;
+    for (const p of r.data.pages) expect(p.queryTerms).toBe(1);
+  });
+});
