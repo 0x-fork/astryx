@@ -688,14 +688,25 @@ function DropdownMenuPopover({
       ),
   });
 
+  // Mounting already open (`isMenuOpen` true on the first render) is not an
+  // open anyone asked for, so it must not move focus into the menu — that
+  // drops keyboard users mid-page (#5976). The flag is decided once at mount
+  // rather than per effect run, because the layer may defer the first show
+  // until its popover element mounts; it clears once the consumer closes the
+  // menu, so every later open follows the modality rules above.
+  const isMountedOpenRef = useRef(isControlled && controlledIsOpen === true);
+
   // Sync controlled open state → popover.
   useEffect(() => {
     if (isControlled) {
       if (controlledIsOpen && !popover.isOpen) {
-        shouldFocusOnOpenRef.current = true;
+        shouldFocusOnOpenRef.current = !isMountedOpenRef.current;
         popover.show();
-      } else if (!controlledIsOpen && popover.isOpen) {
-        popover.hide();
+      } else if (!controlledIsOpen) {
+        isMountedOpenRef.current = false;
+        if (popover.isOpen) {
+          popover.hide();
+        }
       }
     }
   }, [controlledIsOpen, isControlled, popover]);
@@ -809,10 +820,21 @@ function DropdownMenuPopover({
           e.preventDefault();
           openAndFocus();
         }
+        return;
       }
-      // When open, key events go to the menu container via useListFocus
+      // Open with focus still on the trigger — a menu that mounted open, or
+      // a pointer open followed by Shift+Tab — has nothing in the tab order
+      // to reach its items, so ArrowDown walks in the way a keyboard open
+      // would land (#5976). Enter/Space keep toggling the menu closed, and
+      // once focus is inside, key events go to the menu container instead.
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (!focusFirst()) {
+          listRef.current?.focus();
+        }
+      }
     },
-    [popover.isOpen, openAndFocus],
+    [popover.isOpen, openAndFocus, focusFirst, listRef],
   );
 
   // Icon-only
