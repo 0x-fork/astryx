@@ -15,8 +15,10 @@
 
 import {describe, expect, it} from 'vitest';
 import {
+  citeSource,
   definePattern,
   unansweredDimensions,
+  type AstryxRecord,
   type Expectation,
   type PatternContract,
 } from './contract';
@@ -148,6 +150,84 @@ describe('definePattern', () => {
         ],
       }),
     ).toThrow(/unknown evidence layer/);
+  });
+
+  describe('an Astryx record as a source', () => {
+    // It can make an expectation GATE (FR9), so a citation a reviewer cannot
+    // check is not good enough.
+    const record = (
+      overrides: Partial<Omit<AstryxRecord, 'standard'>> = {},
+    ): AstryxRecord => ({
+      standard: 'astryx',
+      id: 'family:probes',
+      clause: 'FR1',
+      requirement: 'A probe MUST probe.',
+      url: `https://github.com/facebook/astryx/blob/${'a'.repeat(40)}/docs/families/probes.md`,
+      ...overrides,
+    });
+
+    it('accepts one that names its record, its clause, and its bytes', () => {
+      expect(
+        pattern({expectations: [expectation({sources: [record()]})]}),
+      ).not.toThrow();
+    });
+
+    it.each([['id'], ['clause'], ['requirement']] as const)(
+      'refuses one with no %s',
+      field => {
+        expect(
+          pattern({
+            expectations: [expectation({sources: [record({[field]: '  '})]})],
+          }),
+        ).toThrow(new RegExp(`cites an Astryx record with no ${field}`));
+      },
+    );
+
+    const PIN = 'a'.repeat(40);
+
+    it.each([
+      // Only resolves inside a checkout.
+      ['docs/families/probes.md'],
+      // Not public: a reviewer of this repository cannot open it, and it must
+      // never appear in it.
+      ['https://www.internalfb.com/code/astryx/docs/families/probes.md'],
+      ['http://github.com/facebook/astryx/blob/' + PIN + '/docs/x.md'],
+      // Every one of these moves out from under the quote.
+      ['https://github.com/facebook/astryx/blob/main/docs/x.md'],
+      ['https://github.com/facebook/astryx/blob/HEAD/docs/x.md'],
+      ['https://github.com/facebook/astryx/blob/develop/docs/x.md'],
+      ['https://github.com/facebook/astryx/blob/v1.2.3/docs/x.md'],
+      ['https://github.com/facebook/astryx/blob/refs/heads/main/docs/x.md'],
+      ['https://github.com/facebook/astryx/raw/' + PIN + '/docs/x.md'],
+      // A short sha is ambiguous over a long enough history.
+      ['https://github.com/facebook/astryx/blob/abc1234/docs/x.md'],
+    ])('refuses %s', url => {
+      expect(
+        pattern({expectations: [expectation({sources: [record({url})]})]}),
+      ).toThrow(/pinned to the bytes the requirement was quoted from/);
+    });
+
+    it('accepts a public GitHub URL pinned to a full commit sha', () => {
+      expect(
+        pattern({
+          expectations: [
+            expectation({
+              sources: [
+                record({
+                  url: `https://github.com/facebook/astryx/blob/${PIN}/docs/families/probes.md#L1-L2`,
+                }),
+              ],
+            }),
+          ],
+        }),
+      ).not.toThrow();
+    });
+
+    it('says which record and clause in the citation, not just the id', () => {
+      expect(citeSource(record())).toBe(
+        'Astryx family:probes FR1: A probe MUST probe.',
+      );
+    });
   });
 
   it('refuses an unknown layer in alsoNeeds', () => {

@@ -70,8 +70,21 @@ export interface ApgRequirement {
 /** A current Astryx knowledge record that adopts an outcome. */
 export interface AstryxRecord {
   readonly standard: 'astryx';
-  /** Record id, e.g. `spec:AST-013`. */
+  /** The record's own stable id, e.g. `spec:AST-013` or `family:buttons`. */
   readonly id: string;
+  /** The clause within it, e.g. `FR3`. */
+  readonly clause: string;
+  /**
+   * The requirement, quoted exactly — the same discipline the APG sources
+   * follow. A citation a reader cannot check against the record is not a
+   * citation, and an id alone does not say what was adopted.
+   */
+  readonly requirement: string;
+  /**
+   * A public URL pinned to the bytes this quote was taken from. `main` moves;
+   * a citation that moves with it is a citation to whatever the record becomes,
+   * which is exactly what a normative reference must not be.
+   */
   readonly url: string;
 }
 
@@ -85,7 +98,7 @@ export function citeSource(source: NormativeSource): string {
     case 'apg':
       return `APG ${source.pattern}: ${source.requirement}`;
     case 'astryx':
-      return `Astryx ${source.id}`;
+      return `Astryx ${source.id} ${source.clause}: ${source.requirement}`;
   }
 }
 
@@ -131,6 +144,19 @@ export interface ExpectationContext<Facts> {
    * excuse itself: a reader sees which states did not exercise it.
    */
   readonly notApplicable: (reason: string) => never;
+  /**
+   * How many times the control's action has run since it was mounted.
+   *
+   * Some patterns have no state to read. A switch says whether it is on, so
+   * "pressing it worked" is observable from the control itself; a button's
+   * action leaves no trace on the button at all. The BINDING knows — it renders
+   * the component and can count the handler — so it supplies this and the
+   * contract asks.
+   *
+   * A binding that does not supply it makes every expectation reading it fail
+   * as a harness fault, loudly, rather than quietly passing.
+   */
+  readonly activations: () => Promise<number>;
 }
 
 export interface Expectation<Facts> {
@@ -201,6 +227,17 @@ export function requiredLayers<Facts>(
 ): readonly EvidenceLayer[] {
   return [expectation.evidenceLayer, ...(expectation.alsoNeeds ?? [])];
 }
+
+/**
+ * A public GitHub URL pinned to one commit.
+ *
+ * A full 40-character sha, not a branch or a tag: both move, and a normative
+ * citation that moves cites whatever the record later becomes. Public GitHub
+ * rather than any https URL, because a link into an internal system is one a
+ * reviewer of this repository cannot open — and must never appear in it.
+ */
+const PINNED_PUBLIC_SOURCE =
+  /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/blob\/[0-9a-f]{40}\/\S+$/;
 
 /** Test name and failure prefix. Carries the id and the source (AST-020 FR4). */
 export function describeExpectation<Facts>(
@@ -277,6 +314,34 @@ export function definePattern<Facts>(
     }
     if (expectation.sources.length === 0) {
       problems.push(`${id} cites no normative source`);
+    }
+    // An Astryx record can make an expectation gate (FR9), so a citation nobody
+    // can check is not good enough: it must say WHICH record, WHICH clause,
+    // quote the requirement, and link to bytes that cannot move underneath it.
+    for (const source of expectation.sources) {
+      if (source.standard !== 'astryx') {
+        continue;
+      }
+      for (const [field, value] of [
+        ['id', source.id],
+        ['clause', source.clause],
+        ['requirement', source.requirement],
+      ] as const) {
+        if (value.trim() === '') {
+          problems.push(
+            `${id} cites an Astryx record with no ${field} (AST-020 FR1)`,
+          );
+        }
+      }
+      // One exact shape, rather than a list of the ways a URL can go wrong.
+      // Anything looser lets through the two failures that matter: a link only
+      // this checkout can open, and a link whose bytes move out from under the
+      // quote — `main`, `HEAD`, a tag, a branch named anything at all.
+      if (!PINNED_PUBLIC_SOURCE.test(source.url)) {
+        problems.push(
+          `${id} cites Astryx record "${source.id}" at "${source.url}". A record cited by a contract has to be readable by anyone reviewing it and pinned to the bytes the requirement was quoted from, so the URL must look like https://github.com/<org>/<repo>/blob/<full commit sha>/<path> (AST-020 FR1)`,
+        );
+      }
     }
     if (
       expectation.sources[0]?.standard === 'apg' &&

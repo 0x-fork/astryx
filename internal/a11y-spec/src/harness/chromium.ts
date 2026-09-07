@@ -27,6 +27,7 @@
  *   to ../harness/jsdom.ts — both implement Harness in ../harness.ts.
  */
 
+import {errors as playwrightErrors} from '@playwright/test';
 import type {CDPSession, Locator, Page} from '@playwright/test';
 import {
   type ComputedNode,
@@ -44,8 +45,27 @@ export const CHROMIUM_OBSERVES: readonly EvidenceLayer[] = [
   'real-browser',
 ];
 
+/**
+ * How long a pointer gets to reach a control before the attempt is a failure.
+ *
+ * Generous for a control that is reachable at all — Playwright's actionability
+ * check normally settles in single-digit milliseconds — and short enough that a
+ * control a pointer can never reach reports why instead of hanging.
+ */
+const POINTER_REACH_BUDGET_MS = 2_000;
+
+/**
+ * Playwright's own timeout type, rather than a regex over the message: the
+ * message is prose that can be reworded in any release, and matching it would
+ * turn a wording change into a mystery failure.
+ */
+function isTimeout(error: unknown): boolean {
+  return error instanceof playwrightErrors.TimeoutError;
+}
+
 const KEYS: Record<Key, string> = {
   Space: ' ',
+  Enter: 'Enter',
   Tab: 'Tab',
 };
 
@@ -218,28 +238,30 @@ export function createChromiumHarness(
     computed: () => computedNode(cdp, locator),
     visibleLabelText: () =>
       locator.evaluate(element => {
-        // Whether a person can actually read this text.
-        //
-        // Two questions, because no single API answers both.
+        // Whether a person can actually read this text. Two questions, because
+        // no single API answers both.
         //
         // `checkVisibility` is the platform's own answer to "is this rendered
-        // at all", and it walks ancestors — so a label inside a
+        // at all", and it walks ancestors — so a node inside a
         // `visibility: hidden`, `opacity: 0`, or `display: none` wrapper is
         // correctly invisible without this code reimplementing the cascade.
-        //
-        // What it cannot answer is whether anything of the element actually
-        // lands on screen: every sr-only recipe stays "visible" to it. So the
-        // element is sampled — if a point over it resolves to the element, to
-        // something inside it, or to something COVERING it, the element paints
-        // there. If every sample resolves to one of the element's own
-        // ancestors, nothing of it paints: it is clipped away, whatever its box
-        // says. If a sample resolves to nothing at all, that point is outside
-        // the viewport.
-        //
-        // Occlusion is deliberately not hiding: a label under an overlay is
-        // still a label a person can read when the overlay moves, and treating
-        // it as hidden would silently switch off the criterion that reads it.
-        const paints = (node: Element): boolean => {
+        // What it cannot answer is whether anything of the node LANDS on
+        // screen: every sr-only recipe stays "visible" to it. Hence the box.
+        /**
+         * A wrapper that generates no box of its own and lets its children lay
+         * out as if it were not there. Judging it by its own box would be
+         * wrong twice over: it has none, and its children may be perfectly
+         * readable. Astryx wraps button content in one, so this is not an edge
+         * case — it is the common path.
+         */
+        const isTransparentBox = (node: Element): boolean =>
+          getComputedStyle(node).display === 'contents';
+
+        const rendered = (node: Element): boolean => {
+          if (isTransparentBox(node)) {
+            // Nothing to judge here; each child is judged on its own.
+            return true;
+          }
           if (
             !node.checkVisibility({
               visibilityProperty: true,
@@ -248,6 +270,50 @@ export function createChromiumHarness(
             })
           ) {
             return false;
+          }
+          const box = node.getBoundingClientRect();
+          // The sr-only recipe: clipped to a 1px box, still in the tree.
+          return box.width > 1 && box.height > 1;
+        };
+
+        /**
+         * Whether text sitting directly in this node can be read.
+         *
+         * Separate from `rendered` because `color` inherits but is overridable:
+         * a transparent wrapper whose child re-colours its own text is showing
+         * that child's words, and judging the wrapper would erase them. So this
+         * asks only about the node the text is actually in.
+         *
+         * Astryx dims a button's label with `color: transparent` while it waits
+         * on an action, so this is a real case, not a hypothetical one.
+         */
+        const textIsReadable = (node: Element): boolean =>
+          !/^rgba\(.*,\s*0\)$/.test(getComputedStyle(node).color);
+
+        /**
+         * Whether the label element as a whole paints anywhere.
+         *
+         * Sampling catches the case the box cannot: a FULL-SIZE element clipped
+         * away entirely (`clip-path: inset(100%)`), which keeps its box and
+         * stays "visible" to the platform. If a point over it resolves to the
+         * element, to something inside it, or to something covering it, it
+         * paints there; if every sample resolves to one of its own ancestors,
+         * nothing of it paints.
+         *
+         * Applied only to the element being measured, never to its descendants:
+         * a span inside a button legitimately hit-tests to the button, and
+         * treating that as hidden would erase every nested label.
+         *
+         * Occlusion is deliberately not hiding: a label under an overlay is
+         * still a label a person can read when the overlay moves.
+         */
+        const paints = (node: Element): boolean => {
+          if (!rendered(node)) {
+            return false;
+          }
+          if (isTransparentBox(node)) {
+            // No box to sample; whether anything shows is up to the children.
+            return true;
           }
           const box = node.getBoundingClientRect();
           const samples: ReadonlyArray<readonly [number, number]> = [
@@ -264,9 +330,36 @@ export function createChromiumHarness(
             return at === node || node.contains(at) || !at.contains(node);
           });
         };
+
+        // The text a person can actually READ inside this node.
+        //
+        // Not `textContent`: a control commonly carries a visually-hidden live
+        // region or an sr-only span inside it, and counting that text would
+        // report words nobody sees — which then reads as a label mismatch
+        // against a name that (correctly) does not contain them. So the walk
+        // descends and drops any subtree that is not rendered.
+        const visibleTextOf = (node: Element): string => {
+          let text = '';
+          for (const child of node.childNodes) {
+            if (child.nodeType === Node.TEXT_NODE) {
+              if (textIsReadable(node)) {
+                text += child.nodeValue ?? '';
+              }
+            } else if (
+              child.nodeType === Node.ELEMENT_NODE &&
+              rendered(child as Element)
+            ) {
+              text += ` ${visibleTextOf(child as Element)} `;
+            }
+          }
+          return text.replace(/\s+/g, ' ').trim();
+        };
         const textOf = (node: Element): string | null => {
-          const text = (node.textContent ?? '').replace(/\s+/g, ' ').trim();
-          return text !== '' && paints(node) ? text : null;
+          if (!paints(node)) {
+            return null;
+          }
+          const text = visibleTextOf(node);
+          return text === '' ? null : text;
         };
 
         // The platform's own labelling order, not any design system's.
@@ -314,16 +407,50 @@ export function createChromiumHarness(
     click: async (_subject, options) => {
       // Without `force`, Playwright first satisfies itself that the control is
       // visible, stable, enabled, and actually receives pointer events — so an
-      // ordinary click here also proves a pointer could reach the switch.
+      // ordinary click here also proves a pointer could reach the control.
       // `ignoreAvailability` skips that judgement, which is the only way to ask
       // a control the browser calls unavailable what it does when clicked
       // anyway.
-      await locator.click({force: options?.ignoreAvailability === true});
+      try {
+        await locator.click({
+          force: options?.ignoreAvailability === true,
+          // Bounded, and short. A control a pointer cannot reach — one covered
+          // by something else, or clipped to nothing — otherwise sits here
+          // until the whole test times out, and a timeout says nothing about
+          // WHY. This turns that into a legible failure the report can carry.
+          timeout: POINTER_REACH_BUDGET_MS,
+        });
+      } catch (error) {
+        if (isTimeout(error)) {
+          throw new Error(
+            `a pointer could not reach this control within ${POINTER_REACH_BUDGET_MS}ms: the browser never found it visible, stable, and able to receive a pointer event. Something is covering it, or it is clipped to nothing.`,
+            {cause: error},
+          );
+        }
+        throw error;
+      }
     },
     abortedPress: async () => {
       const box = await locator.boundingBox();
       if (box == null) {
         throw new Error('the subject has no box to press on');
+      }
+      // A press that never lands on the control proves nothing about what
+      // releasing it elsewhere does. Without this, a control a pointer cannot
+      // reach reports a serene pass for pointer cancellation — the exact
+      // vacuous green the evidence-layer rules exist to prevent.
+      const reachable = await locator.evaluate(element => {
+        const rect = element.getBoundingClientRect();
+        const at = element.ownerDocument.elementFromPoint(
+          rect.x + rect.width / 2,
+          rect.y + rect.height / 2,
+        );
+        return at != null && (at === element || element.contains(at));
+      });
+      if (!reachable) {
+        throw new Error(
+          'a pointer press cannot land on this control: something else is on top of it at its own centre, so there is no press here to abort',
+        );
       }
       const viewport = await page.evaluate(() => ({
         width: window.innerWidth,
