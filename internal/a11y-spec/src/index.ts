@@ -52,6 +52,7 @@ export {
 export {
   MissingBindingCapability,
   runBinding,
+  unmatchedKnownFailures,
   type BindingResult,
   type ExpectationResult,
   type KnownFailure,
@@ -70,6 +71,8 @@ export {
 } from './report';
 
 export {createJsdomHarness, type JsdomHarnessOptions} from './harness/jsdom';
+
+export {CHECKBOX_PATTERN, type CheckboxStateFacts} from './patterns/checkbox';
 
 export {SWITCH_PATTERN, type SwitchStateFacts} from './patterns/switch';
 

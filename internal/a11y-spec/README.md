@@ -39,19 +39,18 @@ src/
 ├── spoken.ts      how a visible label is compared against a computed name
 ├── storybook.ts   a static server over a built Storybook, for the browser lane
 └── patterns/
-    ├── switch.ts             the switch pattern
-    ├── switch.fixtures.ts    conforming + deliberately violating fixtures
-    ├── switch.jsdom.test.ts  the contract's own proof, DOM layer
-    ├── switch.chromium.spec.ts  the same proof in a real engine
-    └── button.*              the button pattern, same four files
+    ├── checkbox.*           the checkbox pattern, same four files
+    ├── switch.*             the switch pattern, same four files
+    └── button.*             the button pattern, same four files
 ```
 
 ## The patterns
 
-| Pattern  | Adopted from                                                   | Bound by                                                                 |
-| -------- | -------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `switch` | [APG switch](https://www.w3.org/WAI/ARIA/apg/patterns/switch/) | Switch                                                                   |
-| `button` | [APG button](https://www.w3.org/WAI/ARIA/apg/patterns/button/) | Button, IconButton, ClickableCard, SideNavCollapseButton, ChatSendButton |
+| Pattern    | Adopted from                                                       | Bound by                                                                  |
+| ---------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| `checkbox` | [APG checkbox](https://www.w3.org/WAI/ARIA/apg/patterns/checkbox/) | CheckboxInput, CheckboxListItem, DropdownMenuCheckboxItem, SelectableCard |
+| `switch`   | [APG switch](https://www.w3.org/WAI/ARIA/apg/patterns/switch/)     | Switch                                                                    |
+| `button`   | [APG button](https://www.w3.org/WAI/ARIA/apg/patterns/button/)     | Button, IconButton, ClickableCard, SideNavCollapseButton, ChatSendButton  |
 
 The button pattern covers the ordinary command button. A toggle button carries
 `aria-pressed` and is its own pattern; anything that adopts link semantics — an
@@ -157,11 +156,16 @@ and styling stay in the component's own suite (AST-021 FR5).
 ## Known failures
 
 A known failure names one expectation, one binding, one state, one evidence
-layer, the user impact, a public issue, and why the migration is not the place
-to fix it. It still runs, it still fails, and it is reported as debt. A
-different message, another state, or a wider failure fails the build anyway, and
-an expectation that starts passing is reported as an unexpected pass so the
-stale record is deleted (AST-021 FR8–FR10).
+layer, the exact standards reference, the user impact, a public issue, and why
+the migration is not the place to fix it. It still runs, it still fails, and is
+reported as debt. The record matches the complete failure message, not a
+substring; a different message, another state, or a wider failure remains a
+`fail` rather than being absorbed by the record. Required failures gate;
+advisory failures remain report-only under AST-020 FR9. A full binding sweep
+also requires every record to match exactly one executed result, so deleted
+states and renamed expectations cannot orphan debt. An expectation that starts
+passing is reported as an unexpected pass so that exact stale record is deleted;
+its issue closes only when no remaining records refer to it (AST-021 FR8–FR10).
 
 ## Running
 
