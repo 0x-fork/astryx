@@ -9,10 +9,6 @@
     }
   },
   {
-    "component": "core/Collapsible",
-    "reason": "Nothing in the trigger or the panel is side-specific. The trigger is a `space-between` flex row, so the label hangs off the reading-start edge and the chevron off the reading-end edge in either direction, with no physical left or right anywhere in the styles. The chevron itself rotates between down and up \u2014 the one axis that does not mirror, because a panel opens downward in every locale \u2014 and it is a vertical glyph to begin with, so there is nothing in it to flip. The panel is a block-flow region whose only geometry is a height transition, and the group's dividers are horizontal rules. No inset, offset, order, transform, drag, scroll, or overlay."
-  },
-  {
     "component": "core/ToggleButton",
     "reason": "ToggleButton stories lay out label and optional icon in an inline flex row with logical gap only \u2014 no directional glyphs (the toolbar icons are non-directional), no side-specific placement, order, inset, or offset, no scrolling, dragging, or overlays. Elevation is a symmetric box-shadow, direction-independent by construction, so the LTR and RTL renders are mirror-identical."
   },
