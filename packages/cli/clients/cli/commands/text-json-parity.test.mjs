@@ -310,7 +310,8 @@ const CASES = [
     name: 'docs',
     args: ['docs'],
     jsonFieldAllowlist: [
-      'package — omitted to preserve the published 0.6 docs list text contract',
+      'topic — inline layout lead column, not a key: value record',
+      'description — inline layout trailing column',
     ],
   },
   {
