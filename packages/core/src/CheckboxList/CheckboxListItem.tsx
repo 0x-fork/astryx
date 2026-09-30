@@ -220,13 +220,11 @@ export function CheckboxListItem({
   // Disabled: parent-level OR item-level
   const effectiveDisabled = (ctx?.isDisabled ?? false) || isItemDisabled;
   const effectiveReadOnly = ctx?.isReadOnly ?? false;
-  // Loading is per-item: explicit item prop OR (collection mode) the item
+  // Loading is per-item: explicit item prop OR (collection mode) an item
   // whose `changeAction` is currently pending in the parent.
   const isBusy =
     isItemLoading ||
-    (ctx?.loadingValue != null && value !== undefined
-      ? ctx.loadingValue === value
-      : false);
+    (value !== undefined && (ctx?.loadingValues?.includes(value) ?? false));
 
   // Resolve checked state:
   // 1. Collection mode (inside CheckboxList with value[])
@@ -249,6 +247,18 @@ export function CheckboxListItem({
   // a toggleable item, or one carrying a consumer `onClick`.
   const checkboxRef = useRef<HTMLInputElement | null>(null);
   const hasRowInteraction = isInteractive || onClickProp != null;
+
+  // A read-only checkbox carries aria-readonly, which the row's clickable
+  // container treats as a non-interactive target, so a click on it would be
+  // delegated straight back to the checkbox without end. Stop that click at
+  // the checkbox; the consumer onClick still fires once per click.
+  const handleCheckboxClick: typeof onClickProp =
+    effectiveReadOnly && onClickProp != null
+      ? event => {
+          onClickProp(event);
+          event.stopPropagation();
+        }
+      : onClickProp;
 
   const handleToggle = () => {
     if (effectiveDisabled || effectiveReadOnly || isBusy) {
@@ -308,7 +318,7 @@ export function CheckboxListItem({
           isLabelHidden
           value={resolvedChecked}
           onChange={() => handleToggle()}
-          onClick={onClickProp}
+          onClick={handleCheckboxClick}
           isDisabled={effectiveDisabled}
           isReadOnly={effectiveReadOnly}
           isLoading={isBusy}
