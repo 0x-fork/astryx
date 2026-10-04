@@ -4,8 +4,9 @@
 
 /**
  * @file TimeGridView.tsx
- * @input Schedule context, visible days, timezone, and hour bounds
- * @output Shared weekly/day time-grid layout
+ * @input Schedule context, visible days, timezone, hour bounds, and the range label
+ * @output Shared weekly/day time-grid layout: one scroll viewport whose sticky
+ *   day header, all-day row, and hour gutter share the day columns' grid tracks
  * @position Internal view primitive shared by WeeklyView and DayView
  */
 
@@ -20,9 +21,11 @@ import {
   plainDateToISO,
   type PlainDate,
 } from '@astryxdesign/core/utils';
+import {useScrollableArea} from '@astryxdesign/core/hooks';
 import {Heading, Text} from '@astryxdesign/core/Text';
 import {useScheduleContext} from './context';
 import {eventOccursOnDate, isDayEvent} from './dateMath';
+import {timeGridViewportScope} from './schedule.stylex';
 import {
   clamp,
   EventPill,
@@ -57,6 +60,7 @@ export function TimeGridView({
   minHour,
   maxHour,
   hourHeight,
+  label,
 }: {
   days: PlainDate[];
   events: ReadonlyArray<CalendarEvent>;
@@ -65,6 +69,8 @@ export function TimeGridView({
   minHour: number;
   maxHour: number;
   hourHeight: number;
+  /** Accessible name of the rendered range; names the scroll viewport. */
+  label: string;
 }) {
   const {categories, headingLevel, locale} = useScheduleContext();
   const normalizedMinHour = Math.max(0, Math.min(23, Math.floor(minHour)));
@@ -93,6 +99,25 @@ export function TimeGridView({
     locale,
   );
 
+  const {getViewportProps, getContentProps} = useScrollableArea({
+    axis: 'both',
+    keyboardAccess: {
+      owner: 'viewport',
+      label: `${label} time grid`,
+      role: 'region',
+    },
+  });
+  const viewportProps = getViewportProps<HTMLDivElement>(
+    stylex.props(styles.timeGridViewport, timeGridViewportScope),
+  );
+  const contentProps = getContentProps<HTMLDivElement>(
+    stylex.props(styles.timeGridContent(days.length)),
+  );
+
+  // Everything painted below is decoration for sighted users; the hidden grid
+  // above is what assistive technology reads. Each painted part is hidden on
+  // its own, rather than the whole viewport, so the viewport itself can stay
+  // a reachable, named keyboard scroll owner.
   return (
     <>
       <TimeGridAccessibilityGrid
@@ -106,58 +131,56 @@ export function TimeGridView({
         timezoneID={timezoneID}
         timezoneLabel={timezoneLabel}
       />
-      <div aria-hidden {...stylex.props(styles.timeGrid)}>
-        <div {...stylex.props(styles.timeGridCorner)} />
-        <div {...stylex.props(styles.timeGridHeader)}>
-          {days.map((day, index) => (
-            <div
-              key={plainDateToISO(day)}
-              {...stylex.props(
-                styles.timeGridHeaderCell,
-                index === days.length - 1 && styles.timeGridHeaderCellLast,
-              )}>
-              <Heading
-                level={headingLevel}
-                color="secondary"
-                display="block"
-                xstyle={styles.timeGridHeaderHeading}>
-                <span {...stylex.props(styles.timeGridHeaderHeadingContent)}>
-                  {formatWeekday(day, timezoneID, 'short', locale)}
-                  <span
-                    {...stylex.props(
-                      styles.timeGridDayNumber,
-                      plainDateIsEqual(day, focusDate) &&
-                        styles.timeGridCurrentDayPill,
-                    )}>
-                    {formatDayNumber(day, timezoneID, locale)}
+      <div {...stylex.props(styles.timeGridFrame)}>
+        <div {...viewportProps}>
+          <div {...contentProps}>
+            <div aria-hidden {...stylex.props(styles.timeGridCorner)} />
+            {days.map((day, index) => (
+              <div
+                key={plainDateToISO(day)}
+                aria-hidden
+                {...stylex.props(
+                  styles.timeGridHeaderCell,
+                  styles.dayColumnPlacement(index),
+                  index === days.length - 1 && styles.timeGridHeaderCellLast,
+                )}>
+                <Heading
+                  level={headingLevel}
+                  color="secondary"
+                  display="block"
+                  xstyle={styles.timeGridHeaderHeading}>
+                  <span {...stylex.props(styles.timeGridHeaderHeadingContent)}>
+                    {formatWeekday(day, timezoneID, 'short', locale)}
+                    <span
+                      {...stylex.props(
+                        styles.timeGridDayNumber,
+                        plainDateIsEqual(day, focusDate) &&
+                          styles.timeGridCurrentDayPill,
+                      )}>
+                      {formatDayNumber(day, timezoneID, locale)}
+                    </span>
                   </span>
-                </span>
-              </Heading>
+                </Heading>
+              </div>
+            ))}
+            <div aria-hidden {...stylex.props(styles.allDayLabel)}>
+              <Text type="supporting" color="secondary" weight="bold">
+                {timezoneLabel}
+              </Text>
             </div>
-          ))}
-        </div>
-        <div {...stylex.props(styles.allDayLabel)}>
-          <Text type="supporting" color="secondary" weight="bold">
-            {timezoneLabel}
-          </Text>
-        </div>
-        <div {...stylex.props(styles.allDayRow)}>
-          <div
-            {...stylex.props(
-              styles.allDayRowSurface(days.length, allDayLevelCount),
-            )}>
-            <div {...stylex.props(styles.allDayCellGrid(days.length))}>
+            <div
+              aria-hidden
+              {...stylex.props(styles.allDayRow(allDayLevelCount))}>
               {days.map((day, index) => (
                 <div
                   key={plainDateToISO(day)}
                   {...stylex.props(
                     styles.allDayCell,
+                    styles.allDaySubgridPlacement(index),
                     index === days.length - 1 && styles.allDayCellLast,
                   )}
                 />
               ))}
-            </div>
-            <div {...stylex.props(styles.allDayEventOverlay(days.length))}>
               {allDaySegments.map(segment => (
                 <div
                   key={`${segment.event.id}:${segment.columnStart}`}
@@ -179,22 +202,18 @@ export function TimeGridView({
                 </div>
               ))}
             </div>
-          </div>
-        </div>
-        <div {...stylex.props(styles.timeGridBody)}>
-          <div {...stylex.props(styles.timeLabels)}>
-            {hours.slice(1).map((hour, index) => (
-              <div
-                key={hour}
-                {...stylex.props(
-                  styles.timeLabel,
-                  styles.timeLabelPosition(index + 1, hourHeight),
-                )}>
-                {formatHour(hour, locale)}
-              </div>
-            ))}
-          </div>
-          <div {...stylex.props(styles.timeColumns)}>
+            <div aria-hidden {...stylex.props(styles.timeLabels)}>
+              {hours.slice(1).map((hour, index) => (
+                <div
+                  key={hour}
+                  {...stylex.props(
+                    styles.timeLabel,
+                    styles.timeLabelPosition(index + 1, hourHeight),
+                  )}>
+                  {formatHour(hour, locale)}
+                </div>
+              ))}
+            </div>
             {days.map((day, index) => {
               const currentTimeTop = getCurrentTimeTop({
                 currentTime,
@@ -206,17 +225,19 @@ export function TimeGridView({
               return (
                 <div
                   key={plainDateToISO(day)}
+                  aria-hidden
                   {...stylex.props(
                     styles.timeColumn,
+                    styles.dayColumnPlacement(index),
                     styles.timeColumnRows(hourHeight),
                     index === days.length - 1 && styles.timeColumnLast,
                   )}>
-                  {hours.map((hour, index) => (
+                  {hours.map((hour, hourIndex) => (
                     <div
                       key={hour}
                       {...stylex.props(
                         styles.hourSlot,
-                        index === hours.length - 1 && styles.hourSlotLast,
+                        hourIndex === hours.length - 1 && styles.hourSlotLast,
                       )}
                     />
                   ))}
@@ -269,7 +290,6 @@ export function TimeGridView({
                   {plainDateIsEqual(day, currentDate) &&
                     currentTimeTop != null && (
                       <div
-                        aria-hidden
                         {...stylex.props(
                           styles.currentTimeLine(currentTimeTop),
                         )}
@@ -280,6 +300,7 @@ export function TimeGridView({
             })}
           </div>
         </div>
+        <div aria-hidden {...stylex.props(styles.timeGridFocusRing)} />
       </div>
     </>
   );
