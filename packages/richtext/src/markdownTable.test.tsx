@@ -174,6 +174,24 @@ describe('GFM tables', () => {
     });
   });
 
+  it('sizes the scroll wrapper from its container, not from the table', async () => {
+    const {container} = render(
+      <RichTextEditor
+        label="Notes"
+        defaultValue={markdownToEditorStateJSON(
+          '| Name | Role |\n| --- | --- |\n| Ada | Engineer |',
+        )}
+      />,
+    );
+    await waitFor(() => {
+      const wrapper = container.querySelector('table')?.parentElement;
+      expect(wrapper?.getAttribute('contenteditable')).toBeNull();
+      // jsdom keeps `display` but not grid track sizes; the browser test
+      // checks what the track does.
+      expect(wrapper).toHaveStyle({display: 'grid'});
+    });
+  });
+
   it('renders a table from the editor in RichTextView, inside a scroll wrapper', async () => {
     const {container} = render(
       <RichTextView
