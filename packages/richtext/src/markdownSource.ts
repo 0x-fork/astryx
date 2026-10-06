@@ -53,7 +53,9 @@ import {isMarkedHardLineBreak} from './markdownHardLineBreak';
 import {normalizeListIndentation} from './markdownListIndentation';
 import {
   $restoreCharacterReferences,
+  protectBackslashEscapes,
   protectCharacterReferences,
+  protectLinkDestinationParentheses,
 } from './markdownCharacterReferences';
 import {
   $restoreExtensionSources,
@@ -361,18 +363,29 @@ export function importMarkdownKeepingSource(
         const holder = $createParagraphNode();
         root.append(holder);
         // Lexical imports LF lines; the record keeps the authored endings.
-        // Adopted plugins' nodes, and then character references, go through
-        // as stand-ins: plugin nodes come back as extension nodes holding
-        // their source, references come back decoded.
+        // Adopted plugins' nodes, then backslash escapes and parentheses in
+        // link destinations, then character references go through as
+        // stand-ins: plugin nodes come back as extension nodes holding their
+        // source, escapes and parentheses as the literal characters,
+        // references decoded.
         const shielded = shieldExtensionSources(
           withoutCarriageReturns(importChunks[index]?.content ?? chunk.content),
           plugins,
         );
-        const {markdown: chunkMarkdown, standIns} = protectCharacterReferences(
-          shielded.markdown,
+        const escaped = protectBackslashEscapes(shielded.markdown);
+        const destinations = protectLinkDestinationParentheses(
+          escaped.markdown,
         );
-        $convertFromMarkdownString(chunkMarkdown, transformers, holder);
-        $restoreCharacterReferences(holder, standIns);
+        const referenced = protectCharacterReferences(destinations.markdown);
+        $convertFromMarkdownString(referenced.markdown, transformers, holder);
+        $restoreCharacterReferences(
+          holder,
+          new Map([
+            ...escaped.standIns,
+            ...destinations.standIns,
+            ...referenced.standIns,
+          ]),
+        );
         $restoreExtensionSources(holder, shielded.standIns);
         $joinSoftLineBreaks(holder);
         for (const node of holder.getChildren()) {
