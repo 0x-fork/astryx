@@ -17,6 +17,7 @@ import {
   $getRoot,
   $isElementNode,
   $parseSerializedNode,
+  INSERT_LINE_BREAK_COMMAND,
   REDO_COMMAND,
   UNDO_COMMAND,
   type SerializedLexicalNode,
@@ -27,7 +28,11 @@ import {
   editorStateJSONToMarkdown,
   markdownToEditorStateJSON,
 } from './markdownSerializers';
-import {absentToken, splitMarkdownChunks} from './markdownSource';
+import {
+  $joinSoftLineBreaks,
+  absentToken,
+  splitMarkdownChunks,
+} from './markdownSource';
 import {RichTextEditor, type RichTextEditorRef} from './RichTextEditor';
 import {RichTextEditorAutoLinkPlugin} from './RichTextEditorAutoLinkPlugin';
 
@@ -35,6 +40,12 @@ import {RichTextEditorAutoLinkPlugin} from './RichTextEditorAutoLinkPlugin';
  * The conformance corpus for spec:AST-062. Each document must come back byte
  * for byte from a no-op round trip, whatever RichText makes of it.
  */
+interface SerializedShapeNode {
+  readonly type: string;
+  readonly text?: string;
+  readonly children?: ReadonlyArray<SerializedShapeNode>;
+}
+
 const CORPUS: Record<string, string> = {
   empty: '',
   whitespaceOnly: '   \n\n\t\n',
@@ -277,7 +288,7 @@ describe('Markdown source preservation (spec:AST-062)', () => {
     // group writes two paragraphs, in the group's CRLF style.
     expect(
       editAndExport(crlf, () => $appendToBlockContaining('First', ' one')),
-    ).toBe('\uFEFF\r\n# Title\r\n\r\nFirst one\r\nsecond line\r\n\r\nLast\r\n');
+    ).toBe('\uFEFF\r\n# Title\r\n\r\nFirst second line one\r\n\r\nLast\r\n');
     expect(
       editAndExport(crlf, () => {
         const paragraph = $createParagraphNode();
@@ -324,7 +335,8 @@ describe('Markdown source preservation (spec:AST-062)', () => {
 
   it('imports the same structure as importing the whole document at once', () => {
     // Node state aside, chunked import must build exactly the tree Lexical's
-    // own import builds: soft breaks, lazy continuation lines, loose lists.
+    // own import builds, soft breaks joined: lazy continuation lines, loose
+    // lists, and line breaks all land in the same blocks.
     const structureOf = (json: string): unknown =>
       JSON.parse(json, (key, value: unknown) =>
         key === '$' ? undefined : value,
@@ -343,6 +355,7 @@ describe('Markdown source preservation (spec:AST-062)', () => {
             markdown.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n'),
             [...DEFAULT_TRANSFORMERS],
           );
+          $joinSoftLineBreaks($getRoot());
         },
         {discrete: true},
       );
@@ -353,6 +366,138 @@ describe('Markdown source preservation (spec:AST-062)', () => {
         structureOf(wholeDocument(markdown)),
       );
     }
+  });
+
+  it('continues a block across soft line breaks and keeps hard breaks', () => {
+    const shape = (markdown: string): string => {
+      const {root} = JSON.parse(markdownToEditorStateJSON(markdown)) as {
+        root: SerializedShapeNode;
+      };
+      const describe = (node: SerializedShapeNode): string =>
+        node.children != null
+          ? `${node.type}[${node.children.map(describe).join(',')}]`
+          : node.type === 'text'
+            ? JSON.stringify(node.text)
+            : node.type;
+      return root.children?.map(describe).join(' ') ?? '';
+    };
+    expect(shape('One line\nsame paragraph\nstill same\n')).toBe(
+      'paragraph["One line same paragraph still same"]',
+    );
+    expect(shape('Two spaces  \nand a backslash\\\nend\n')).toBe(
+      'paragraph["Two spaces",linebreak,"and a backslash",linebreak,"end"]',
+    );
+    expect(shape('- An item\n  that continues\n')).toBe(
+      'list[listitem["An item that continues"]]',
+    );
+    expect(shape('> A quote\n> on two lines\n')).toBe(
+      'quote["A quote on two lines"]',
+    );
+    expect(shape('**Bold**\nthen plain\n')).toBe(
+      'paragraph["Bold"," then plain"]',
+    );
+    // Code keeps its line endings.
+    expect(shape('```\nline one\nline two\n```\n')).toBe(
+      'code["line one\\nline two"]',
+    );
+    // An edited paragraph is written again on one line.
+    expect(
+      editAndExport('One line\nsame paragraph\n\nNext\n', () =>
+        $appendToTextContaining('One line', ' edited'),
+      ),
+    ).toBe('One line same paragraph edited\n\nNext\n');
+  });
+
+  it('writes a line break typed in the editor as a hard break that survives a reload (FR3)', async () => {
+    const markdown =
+      'Ada Lovelace\n\n- item one\n\n> quoted text\n\nTwo spaces  \nkept\n\n```\ncode line\n```\n';
+    const ref = createRef<RichTextEditorRef>();
+    render(
+      <RichTextEditor
+        label="Notes"
+        ref={ref}
+        defaultValue={markdownToEditorStateJSON(markdown)}
+      />,
+    );
+    // Edit only once the document has loaded.
+    await waitFor(() => expect(ref.current?.getMarkdown()).toBe(markdown));
+    const editor = ref.current?.getEditor();
+    // Shift+Enter after the first word of the paragraph, the list item, the
+    // quote, and the code line.
+    for (const text of [
+      'Ada Lovelace',
+      'item one',
+      'quoted text',
+      'code line',
+    ]) {
+      editor?.update(
+        () => {
+          const node = $getRoot()
+            .getAllTextNodes()
+            .find(candidate => candidate.getTextContent().startsWith(text));
+          node?.select(text.indexOf(' '), text.indexOf(' '));
+        },
+        {discrete: true},
+      );
+      editor?.dispatchCommand(INSERT_LINE_BREAK_COMMAND, false);
+    }
+    const edited =
+      'Ada\\\n Lovelace\n\n- item\\\n one\n\n> quoted\\\n>  text\n\nTwo spaces  \nkept\n\n```\ncode\n line\n```\n';
+    await waitFor(() => expect(ref.current?.getMarkdown()).toBe(edited));
+    // A reload keeps every typed break as a line break.
+    const reloaded = JSON.parse(markdownToEditorStateJSON(edited)) as {
+      root: SerializedShapeNode;
+    };
+    const lineBreaks = (node: SerializedShapeNode): number =>
+      (node.type === 'linebreak' ? 1 : 0) +
+      (node.children ?? []).reduce(
+        (count, child) => count + lineBreaks(child),
+        0,
+      );
+    // Paragraph, list item, quote, and the imported two-space break; the
+    // code line break is part of the code text.
+    expect(lineBreaks(reloaded.root)).toBe(4);
+    expect(editorStateJSONToMarkdown(markdownToEditorStateJSON(edited))).toBe(
+      edited,
+    );
+    editor?.dispatchCommand(UNDO_COMMAND, undefined);
+    await waitFor(() => expect(ref.current?.getMarkdown()).not.toBe(edited));
+    editor?.dispatchCommand(REDO_COMMAND, undefined);
+    await waitFor(() => expect(ref.current?.getMarkdown()).toBe(edited));
+  });
+
+  it('leaves a line break typed in a heading as Lexical writes it', async () => {
+    const ref = createRef<RichTextEditorRef>();
+    render(
+      <RichTextEditor
+        label="Notes"
+        ref={ref}
+        defaultValue={markdownToEditorStateJSON('## Release title\n\nBody\n')}
+      />,
+    );
+    // Edit only once the document has loaded.
+    await waitFor(() =>
+      expect(ref.current?.getMarkdown()).toBe('## Release title\n\nBody\n'),
+    );
+    const editor = ref.current?.getEditor();
+    editor?.update(
+      () => {
+        const node = $getRoot()
+          .getAllTextNodes()
+          .find(candidate => candidate.getTextContent() === 'Release title');
+        node?.select(7, 7);
+      },
+      {discrete: true},
+    );
+    editor?.dispatchCommand(INSERT_LINE_BREAK_COMMAND, false);
+    // No backslash: a heading has no hard-break form.
+    const markdown = '## Release\n title\n\nBody\n';
+    await waitFor(() => expect(ref.current?.getMarkdown()).toBe(markdown));
+    const {root} = JSON.parse(markdownToEditorStateJSON(markdown)) as {
+      root: SerializedShapeNode;
+    };
+    expect(root.children?.[0]?.type).toBe('heading');
+    expect(JSON.stringify(root)).not.toContain('\\\\');
   });
 
   it('keeps document facts at the document when blocks move, repeat, or go (FR4)', () => {

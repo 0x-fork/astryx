@@ -34,6 +34,7 @@ import {
 import {$isCodeNode} from '@lexical/code';
 import {
   $createParagraphNode,
+  $createTextNode,
   $getRoot,
   $getState,
   $isElementNode,
@@ -45,6 +46,7 @@ import {
   type LexicalEditor,
   type LexicalNode,
 } from 'lexical';
+import {isMarkedHardLineBreak} from './markdownHardLineBreak';
 
 /** The whitespace and content one chunk of Markdown source was split into. */
 export interface MarkdownChunk {
@@ -306,6 +308,7 @@ export function importMarkdownKeepingSource(
           transformers,
           holder,
         );
+        $joinSoftLineBreaks(holder);
         for (const node of holder.getChildren()) {
           $setState(node, groupState, {group: `${importId}:${index}`});
         }
@@ -340,6 +343,36 @@ export function importMarkdownKeepingSource(
     },
     {discrete: true},
   );
+}
+
+/**
+ * Joins the lines of a paragraph, list item, or block quote across soft line
+ * breaks: a line ending without two trailing spaces or a backslash continues
+ * the block, as one space (CommonMark, soft line breaks; spec:AST-061 FR5).
+ * Lexical imports every line ending as a line break and marks the hard ones,
+ * so the unmarked ones outside code are the soft breaks.
+ */
+export function $joinSoftLineBreaks(element: ElementNode): void {
+  for (const child of element.getChildren()) {
+    if ($isElementNode(child) && !$isCodeNode(child)) {
+      $joinSoftLineBreaks(child);
+    }
+  }
+  for (const child of element.getChildren()) {
+    if (!$isLineBreakNode(child) || isMarkedHardLineBreak(child)) {
+      continue;
+    }
+    // The spaces around a soft break are part of it.
+    const previous = child.getPreviousSibling();
+    if ($isTextNode(previous) && !previous.hasFormat('code')) {
+      previous.setTextContent(previous.getTextContent().replace(/[ \t]+$/, ''));
+    }
+    const next = child.getNextSibling();
+    if ($isTextNode(next) && !next.hasFormat('code')) {
+      next.setTextContent(next.getTextContent().replace(/^[ \t]+/, ''));
+    }
+    child.replace($createTextNode(' '));
+  }
 }
 
 /**
