@@ -410,10 +410,37 @@ for (const viewport of [PHONE, {width: 1280, height: 900}] as const) {
               .filter(element => element.getBoundingClientRect().width > 0)
               .map(element => {
                 const wrapper = element.parentElement as HTMLElement;
+                // The table's own width: its max-content width, measured
+                // with the inline width restored right after.
+                const previousWidth = element.style.width;
+                let intrinsic: number;
+                try {
+                  element.style.width = 'max-content';
+                  intrinsic = element.getBoundingClientRect().width;
+                } finally {
+                  element.style.width = previousWidth;
+                }
+                // The widest the wrapper could be: the view's containing
+                // block, less the space between the view's edge and the
+                // wrapper.
+                const view = element.closest('[contenteditable]')
+                  ?.parentElement as HTMLElement | null;
+                const host = view?.parentElement;
+                const hostStyle = host == null ? null : getComputedStyle(host);
+                const available =
+                  host == null || hostStyle == null || view == null
+                    ? 0
+                    : host.clientWidth -
+                      parseFloat(hostStyle.paddingLeft) -
+                      parseFloat(hostStyle.paddingRight) -
+                      (view.offsetWidth - wrapper.clientWidth);
                 return {
                   inView: element.closest('[contenteditable="false"]') != null,
                   clientWidth: wrapper.clientWidth,
                   scrollWidth: wrapper.scrollWidth,
+                  intrinsic,
+                  available,
+                  restored: element.style.width === previousWidth,
                 };
               }),
           }));
@@ -439,11 +466,27 @@ for (const viewport of [PHONE, {width: 1280, height: 900}] as const) {
               );
             }
           }
-          if (columnCount === 2 && styles.view !== '') {
-            // A shrink-to-fit host gives the view's small table its natural
-            // width instead of stretching or collapsing it.
+          for (const wrapper of layout.wrappers) {
+            // Measuring the table left its style as it was.
+            expect(wrapper.restored, label).toBe(true);
+          }
+          if (styles.view !== '') {
+            // A shrink-to-fit host gives the view's table its natural width,
+            // up to the room it has: neither stretched nor collapsed. A small
+            // table is narrower than the room, so stretching it fails here.
             const view = layout.wrappers.find(wrapper => wrapper.inView);
-            expect(view?.clientWidth, label).toBeLessThan(viewport.width / 2);
+            if (columnCount === 2) {
+              expect(view?.intrinsic ?? 0, label).toBeLessThan(
+                (view?.available ?? 0) - 8,
+              );
+            }
+            expect(
+              Math.abs(
+                (view?.clientWidth ?? 0) -
+                  Math.min(view?.intrinsic ?? 0, view?.available ?? 0),
+              ),
+              label,
+            ).toBeLessThanOrEqual(1);
           }
         }
       }
@@ -523,6 +566,10 @@ test('side by side: shared blocks match core Markdown typography, spacing, and m
               };
         })(),
         rule: styleOf(block('thematic-break', 'hr')),
+        // Each column's readable width floor, set on its header cell.
+        tableFloors: [
+          ...(block('table', 'table')?.querySelectorAll('th') ?? []),
+        ].map(cell => getComputedStyle(cell).minWidth),
         // The text inside a header cell, where each surface draws it.
         tableHeader: (() => {
           const cell = block('table', 'table')?.querySelector('th');
@@ -567,6 +614,9 @@ test('side by side: shared blocks match core Markdown typography, spacing, and m
       markdown.rule?.[property],
     );
   }
+  expect(richText.tableFloors, 'table column floors').toEqual(
+    markdown.tableFloors,
+  );
   expect(richText.tableHeader, 'table header text').toEqual(
     markdown.tableHeader,
   );
