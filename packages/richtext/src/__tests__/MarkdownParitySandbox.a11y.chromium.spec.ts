@@ -52,7 +52,7 @@ const AXE_DISABLED_RULES = [
 const DESKTOP = {width: 1440, height: 900} as const;
 const PHONE = {width: 390, height: 844} as const;
 
-type Viewport = typeof DESKTOP | typeof PHONE;
+type Viewport = {readonly width: number; readonly height: number};
 
 interface BlockGeometry {
   readonly key: string;
@@ -341,6 +341,265 @@ test('a rule at either edge of the document adds no outer margin', async ({
     ['0px', '24px', '24px', '0px'],
   ]);
 });
+
+// spec:AST-061 FR8: a fenced code block has the same frame and header on
+// both surfaces, so the code sits at the same place; the header is not part
+// of the editable text.
+/**
+ * Whether core Markdown scrolls a fence's lines sideways. RichText wraps them
+ * instead (a scrolling region inside the editable text cannot take focus), so
+ * a fence whose lines do not fit is taller in RichText by its wrapped lines.
+ */
+async function markdownFenceScrolls(page: Page, key: string): Promise<boolean> {
+  return page.evaluate(
+    ({surface, block}) =>
+      [
+        ...document.querySelectorAll<HTMLElement>(
+          `${surface} [data-parity-block="${block}"] *`,
+        ),
+      ].some(element => element.scrollWidth > element.clientWidth + 1),
+    {surface: MARKDOWN, block: key},
+  );
+}
+
+for (const viewport of [PHONE, DESKTOP, {width: 2200, height: 900}] as const) {
+  test(`side by side: a fenced code block has core Markdown's frame and header (${viewport.width}px)`, async ({
+    page,
+  }) => {
+    const errors = await openStory(page, STORY.sideBySide, viewport);
+    await waitForDocument(page, MARKDOWN);
+    await waitForDocument(page, RICH_TEXT);
+    const markdown = await surfaceGeometry(page, MARKDOWN);
+    const richText = await surfaceGeometry(page, RICH_TEXT);
+    const code = (geometry: SurfaceGeometry) =>
+      geometry.blocks.find(block => block.key === 'code-fence');
+    if (!(await markdownFenceScrolls(page, 'code-fence'))) {
+      expect(
+        Math.abs((code(richText)?.height ?? 0) - (code(markdown)?.height ?? 0)),
+      ).toBeLessThanOrEqual(2);
+    }
+    // Each frame is sized like core Markdown's: as wide as its longest line,
+    // at least the 680px measure (or the whole width when narrower), and no
+    // wider than the surface. Each surface is measured against its own width.
+    const frames = await page.evaluate(
+      ({markdownSurface, richTextSurface, keys}) =>
+        keys.map(key => {
+          const markdownBlock = document.querySelector<HTMLElement>(
+            `${markdownSurface} [data-parity-block="${key}"]`,
+          );
+          const markdownFrame = [
+            markdownBlock,
+            ...(markdownBlock?.querySelectorAll<HTMLElement>('*') ?? []),
+          ].find(element => {
+            const style = element == null ? null : getComputedStyle(element);
+            return (
+              style != null &&
+              style.borderTopStyle !== 'none' &&
+              parseFloat(style.borderTopWidth) > 0
+            );
+          });
+          const richTextFrame = document.querySelector<HTMLElement>(
+            `${richTextSurface} [data-parity-block="${key}"]`,
+          );
+          const editable = richTextFrame?.parentElement;
+          const editableStyle =
+            editable == null ? null : getComputedStyle(editable);
+          return {
+            key,
+            markdown: markdownFrame?.getBoundingClientRect().width ?? 0,
+            markdownRoom: markdownBlock?.getBoundingClientRect().width ?? 0,
+            richText: richTextFrame?.getBoundingClientRect().width ?? 0,
+            richTextRoom:
+              editable == null || editableStyle == null
+                ? 0
+                : editable.clientWidth -
+                  parseFloat(editableStyle.paddingLeft) -
+                  parseFloat(editableStyle.paddingRight),
+          };
+        }),
+      {
+        markdownSurface: MARKDOWN,
+        richTextSurface: RICH_TEXT,
+        keys: ['code-fence', 'code-plain', 'code-unknown', 'code-long'],
+      },
+    );
+    for (const frame of frames) {
+      if (frame.key === 'code-long') {
+        // A long line widens the frame past the measure, up to the room.
+        const markdownWide = Math.min(frame.markdownRoom, frame.markdown);
+        expect(frame.markdown, frame.key).toBeGreaterThan(
+          Math.min(680, frame.markdownRoom) - 1,
+        );
+        expect(frame.richText, frame.key).toBeLessThanOrEqual(
+          frame.richTextRoom + 1,
+        );
+        if (frame.markdown < frame.markdownRoom - 1) {
+          // Room to spare on both surfaces: the same width as core's frame.
+          expect(
+            Math.abs(frame.richText - markdownWide),
+            frame.key,
+          ).toBeLessThanOrEqual(2);
+        } else {
+          // Both fill their surface and wrap.
+          expect(
+            Math.abs(frame.richText - frame.richTextRoom),
+            frame.key,
+          ).toBeLessThanOrEqual(1);
+        }
+      } else {
+        // A short block is the measure wide, or the whole width if narrower.
+        expect(
+          Math.abs(frame.markdown - Math.min(680, frame.markdownRoom)),
+          `${frame.key} markdown`,
+        ).toBeLessThanOrEqual(1);
+        expect(
+          Math.abs(frame.richText - Math.min(680, frame.richTextRoom)),
+          `${frame.key} rich text`,
+        ).toBeLessThanOrEqual(1);
+      }
+    }
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth - window.innerWidth,
+      ),
+    ).toBeLessThanOrEqual(0);
+    // One header per fenced block; the first is the `ts` block's.
+    await expect(
+      page.locator(`${RICH_TEXT} [data-richtext-code-header]`),
+    ).toHaveCount(6);
+    const header = page
+      .locator(`${RICH_TEXT} [data-richtext-code-header]`)
+      .first();
+    await expect(header).toContainText('ts');
+    await expect(header.getByRole('button', {name: 'Copy code'})).toBeVisible();
+    expect(
+      await header.evaluate(element => element.closest('[contenteditable]')),
+    ).toBeNull();
+    // The header spans the block, inside its border.
+    const widths = await page.evaluate(selector => {
+      const block = document.querySelector(`${selector} code[data-language]`);
+      const head = document.querySelector(
+        `${selector} [data-richtext-code-header]`,
+      );
+      return [
+        (block as HTMLElement | null)?.clientWidth,
+        head?.getBoundingClientRect().width,
+      ];
+    }, RICH_TEXT);
+    expect(widths[1]).toBe(widths[0]);
+    expect(errors).toEqual([]);
+  });
+}
+
+// A long unbroken line wraps inside the code frame at phone width instead of
+// widening the page, and the copy button copies the block from the keyboard,
+// in the editor and the view.
+test('code blocks wrap long lines at phone width and copy from the keyboard', async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.setViewportSize(PHONE);
+  await page.goto(
+    `${storybook.origin}/iframe.html?id=lab-richtexteditor--markdown-serializers&viewMode=story&globals=astryxTheme:neutral;colorMode:light;direction:ltr`,
+    {waitUntil: 'load'},
+  );
+  const token = 'x'.repeat(160);
+  await page
+    .locator('textarea')
+    .fill(`\`\`\`ts\nconst id = "${token}";\n\`\`\``);
+  await expect(page.locator('[data-richtext-code-header]')).toHaveCount(2);
+  const layout = await page.evaluate(() => ({
+    pageOverflow: document.documentElement.scrollWidth - window.innerWidth,
+    blocks: [...document.querySelectorAll('[data-lexical-editor] code')].map(
+      code => code.scrollWidth - code.clientWidth,
+    ),
+  }));
+  expect(layout.pageOverflow).toBeLessThanOrEqual(0);
+  expect(layout.blocks).toEqual([0, 0]);
+  const copy = page
+    .locator('[data-richtext-code-header]')
+    .last()
+    .getByRole('button', {name: 'Copy code'});
+  await copy.focus();
+  await page.keyboard.press('Enter');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+    `const id = "${token}";`,
+  );
+});
+
+// spec:AST-061 FR8: a fence names a language exactly when core CodeBlock
+// does — not with no info string, a blank one, or `plaintext` — and only a
+// named block reserves the header row, so every fence is as tall as core
+// Markdown's on both surfaces, in both color modes and directions.
+for (const globals of [
+  'colorMode:light;direction:ltr',
+  'colorMode:dark;direction:rtl',
+]) {
+  test(`side by side: fences without a language have no label row (${globals})`, async ({
+    page,
+  }) => {
+    const errors = await openStory(page, STORY.sideBySide, DESKTOP, globals);
+    await waitForDocument(page, MARKDOWN);
+    await waitForDocument(page, RICH_TEXT);
+    const fences = {
+      'code-fence': 'ts',
+      'code-plain': '',
+      'code-blank': '',
+      'code-plaintext': '',
+      'code-unknown': 'notalanguage',
+      'code-long': 'sh',
+    } as const;
+    const markdown = await surfaceGeometry(page, MARKDOWN);
+    const richText = await surfaceGeometry(page, RICH_TEXT);
+    for (const key of Object.keys(fences)) {
+      if (await markdownFenceScrolls(page, key)) {
+        continue;
+      }
+      const height = (geometry: SurfaceGeometry) =>
+        geometry.blocks.find(block => block.key === key)?.height ?? 0;
+      expect(
+        Math.abs(height(richText) - height(markdown)),
+        `${key} height`,
+      ).toBeLessThanOrEqual(2);
+    }
+    // The label core Markdown shows for each fence.
+    const markdownLabels = await page.evaluate(
+      ({selector, names}) =>
+        Object.keys(names).map(key => {
+          const block = document.querySelector(
+            `${selector} [data-parity-block="${key}"]`,
+          );
+          const label = [...(block?.querySelectorAll('*') ?? [])].find(
+            element =>
+              element.childElementCount === 0 &&
+              ['ts', 'notalanguage', 'plaintext', 'sh'].includes(
+                element.textContent?.trim() ?? '',
+              ),
+          );
+          return label?.textContent?.trim() ?? '';
+        }),
+      {selector: MARKDOWN, names: fences},
+    );
+    expect(markdownLabels).toEqual(Object.values(fences));
+    // RichText draws one header per fence, in order, each with a copy button
+    // and the same label.
+    const headers = page.locator(`${RICH_TEXT} [data-richtext-code-header]`);
+    await expect(headers).toHaveCount(6);
+    const richTextLabels = await headers.evaluateAll(elements =>
+      elements.map(element =>
+        (element.textContent ?? '').replace('Copy code', '').trim(),
+      ),
+    );
+    expect(richTextLabels).toEqual(Object.values(fences));
+    for (const index of [0, 1, 2, 3, 4, 5]) {
+      await expect(
+        headers.nth(index).getByRole('button', {name: 'Copy code'}),
+      ).toBeVisible();
+    }
+    expect(errors).toEqual([]);
+  });
+}
 
 for (const viewport of [PHONE, {width: 1280, height: 900}] as const) {
   for (const globals of [
