@@ -27,10 +27,12 @@ import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
 import {RichTextPlugin} from '@lexical/react/LexicalRichTextPlugin';
 import {ContentEditable} from '@lexical/react/LexicalContentEditable';
 import {LexicalErrorBoundary} from '@lexical/react/LexicalErrorBoundary';
+import {TablePlugin} from '@lexical/react/LexicalTablePlugin';
 import {ListNode, ListItemNode} from '@lexical/list';
 import {HeadingNode, QuoteNode} from '@lexical/rich-text';
 import {LinkNode, AutoLinkNode} from '@lexical/link';
 import {CodeNode, CodeHighlightNode} from '@lexical/code';
+import {TableNode, TableRowNode, TableCellNode} from '@lexical/table';
 import type {
   AnyLexicalExtension,
   Klass,
@@ -54,6 +56,9 @@ const DEFAULT_NODES: ReadonlyArray<Klass<LexicalNode>> = [
   AutoLinkNode,
   CodeNode,
   CodeHighlightNode,
+  TableNode,
+  TableRowNode,
+  TableCellNode,
 ];
 
 /**
@@ -262,6 +267,14 @@ export function RichTextView({
         extension={extensionRef.current}
         contentEditable={null}>
         <SyncValuePlugin value={value} />
+        {/* Same table configuration as the editor, so a wide table scrolls
+            inside its own wrapper instead of widening the page. */}
+        <TablePlugin
+          hasCellMerge={false}
+          hasCellBackgroundColor={false}
+          hasTabHandler={false}
+          hasHorizontalScroll
+        />
         <RichTextPlugin
           contentEditable={<ContentEditable {...VIEW_CONTENT_EDITABLE_PROPS} />}
           placeholder={null}
