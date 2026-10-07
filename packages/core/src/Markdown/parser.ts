@@ -850,6 +850,172 @@ function matchLinkDefinition(
 }
 
 /**
+ * A code fence line: up to three spaces of indentation, then three or more
+ * backticks or tildes (CommonMark 0.31 §4.5). Group 1 is the indentation and
+ * group 2 the fence.
+ */
+const FENCE_LINE = /^( {0,3})(`{3,}|~{3,})/;
+
+/**
+ * Whether `line` closes a code block opened with `fence`: a fence of the same
+ * character, at least as long, after up to three spaces of indentation, with
+ * only spaces or tabs after it (CommonMark 0.31 §4.5) — so `   ```js` inside
+ * an open block is code, not its end.
+ */
+function closesFence(line: string, fence: string): boolean {
+  const match = /^ {0,3}(`{3,}|~{3,})[ \t]*\r?$/.exec(line);
+  return (
+    match != null &&
+    match[1].startsWith(fence[0]) &&
+    match[1].length >= fence.length
+  );
+}
+
+/** Where a list item's lines sit: its marker's indentation and content. */
+interface ListItemScope {
+  /** The marker's indentation. */
+  readonly base: number;
+  /** Where the item's content starts: past the marker and its spaces. */
+  readonly content: number;
+  readonly ordered: boolean;
+}
+
+/**
+ * The list item `line` opens, read as the block parser reads one: a bullet or
+ * a number with `.` or `)` after up to nine spaces, then a space. A thematic
+ * break opens no item.
+ */
+function listItemScopeOf(line: string): ListItemScope | null {
+  if (isHorizontalRule(line)) {
+    return null;
+  }
+  const marker = /^( {0,9})([-*+]|\d+[.)]) /.exec(line);
+  if (marker == null) {
+    return null;
+  }
+  const markerEnd = marker[0].length;
+  const spacesAfter = getIndent(line.slice(markerEnd));
+  return {
+    base: marker[1].length,
+    content: spacesAfter >= 4 ? markerEnd : markerEnd + spacesAfter,
+    ordered: marker[2] !== '-' && marker[2] !== '*' && marker[2] !== '+',
+  };
+}
+
+/** What a line does to the top-level code fence. */
+type TopLevelFenceEvent = 'open' | 'close' | 'inside' | null;
+
+/**
+ * Follows the code fences that open at the top level of a document, a line at
+ * a time, as the block parser reads them. A fence indented into an open list
+ * item belongs to that item, whose own parse reads it: it neither opens nor
+ * closes a top-level fence, so a list step's fence closed at the margin leaves
+ * the margin line to open a fence of its own, as the full parse does. Scanners
+ * that run outside the block parser — streaming settlement, link definitions,
+ * display-math trimming — share it so they pair fences the same way.
+ */
+function topLevelFences(): {
+  readonly open: boolean;
+  read(lines: ReadonlyArray<string>, index: number): TopLevelFenceEvent;
+} {
+  let fence = '';
+  // The outermost open list item, and what it last read. After a blank line
+  // inside the item, the parser keeps only lines indented to its content.
+  let item: ListItemScope | null = null;
+  let itemHadBlank = false;
+  let itemFence = '';
+  let itemEndsInParagraph = false;
+  // A number other than 1 cannot interrupt an open top-level paragraph.
+  let paragraphOpen = false;
+
+  const isHeadingOrBreak = (text: string) =>
+    /^ {0,3}#{1,6}(?:[ \t]|$)/.test(text) || isHorizontalRule(text);
+
+  /** Reads a line of the open item, without the item's indentation. */
+  const readItemLine = (text: string) => {
+    if (itemFence !== '') {
+      if (closesFence(text, itemFence)) {
+        itemFence = '';
+      }
+      itemEndsInParagraph = false;
+      return;
+    }
+    const opening = FENCE_LINE.exec(text);
+    if (opening != null) {
+      itemFence = opening[2];
+      itemEndsInParagraph = false;
+      return;
+    }
+    itemEndsInParagraph = text.trim() !== '' && !isHeadingOrBreak(text);
+  };
+
+  return {
+    get open() {
+      return fence !== '';
+    },
+    read(lines, index) {
+      const line = lines[index];
+      if (fence !== '') {
+        if (closesFence(line, fence)) {
+          fence = '';
+          return 'close';
+        }
+        return 'inside';
+      }
+      if (line.trim() === '') {
+        itemHadBlank = item != null;
+        paragraphOpen = false;
+        return null;
+      }
+      const indent = getIndent(line);
+      if (
+        item != null &&
+        (itemHadBlank ? indent >= item.content : indent > item.base)
+      ) {
+        readItemLine(line.slice(Math.min(indent, item.content)));
+        return null;
+      }
+      const scope = listItemScopeOf(line);
+      if (
+        scope != null &&
+        !(
+          paragraphOpen &&
+          item == null &&
+          scope.ordered &&
+          !/^ {0,9}0*1[.)]/.test(line)
+        )
+      ) {
+        item = scope;
+        itemHadBlank = false;
+        itemFence = '';
+        paragraphOpen = false;
+        readItemLine(line.slice(scope.content));
+        return null;
+      }
+      const opening = FENCE_LINE.exec(line);
+      if (opening != null) {
+        item = null;
+        paragraphOpen = false;
+        fence = opening[2];
+        return 'open';
+      }
+      if (
+        item != null &&
+        !itemHadBlank &&
+        itemEndsInParagraph &&
+        canContinueParagraphLazily(lines, index)
+      ) {
+        // A lazy continuation line of the item's paragraph.
+        return null;
+      }
+      item = null;
+      paragraphOpen = !isHeadingOrBreak(line);
+      return null;
+    },
+  };
+}
+
+/**
  * Collect link reference definitions from the whole document and return the
  * input with the definition lines removed. A definition is recognized at a
  * block boundary — document start, after a blank line, after another
@@ -883,20 +1049,13 @@ function extractLinkDefinitions(
   const defs = new Map<string, string>();
   const keep = new Array<boolean>(lines.length).fill(true);
   let atBoundary = true;
-  let inFence = false;
-  let fenceMarker = '';
+  const fences = topLevelFences();
 
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];
-    if (inFence) {
-      if (line.startsWith(fenceMarker)) {
-        inFence = false;
-        fenceMarker = '';
-        // The line after a closed fence begins a new block.
-        atBoundary = true;
-      } else {
-        atBoundary = false;
-      }
+    if (fences.open) {
+      // The line after a closed fence begins a new block.
+      atBoundary = fences.read(lines, index) === 'close';
       continue;
     }
     if (math) {
@@ -909,10 +1068,7 @@ function extractLinkDefinitions(
         continue;
       }
     }
-    const fenceMatch = line.match(/^(`{3,}|~{3,})/);
-    if (fenceMatch) {
-      inFence = true;
-      fenceMarker = fenceMatch[1];
+    if (fences.read(lines, index) === 'open') {
       atBoundary = false;
       continue;
     }
@@ -2952,7 +3108,7 @@ function isBlockStart(line: string): boolean {
   if (/^ {0,3}#{1,6} /.test(line)) {
     return true;
   }
-  if (/^(`{3,}|~{3,})/.test(line)) {
+  if (FENCE_LINE.test(line)) {
     return true;
   }
   if (isHorizontalRule(line)) {
@@ -2989,7 +3145,7 @@ function canContinueParagraphLazily(
   }
   if (
     /^ {0,3}#{1,6} /.test(line) ||
-    /^(`{3,}|~{3,})/.test(line) ||
+    FENCE_LINE.test(line) ||
     isHorizontalRule(line) ||
     QUOTE_MARKER.test(line) ||
     /^ {0,9}[-*+] /.test(line) ||
@@ -3512,12 +3668,12 @@ function parseMarkdownImpl(
     }
 
     // --- Fenced code block ---
-    const fenceMatch = line.match(/^(`{3,}|~{3,})/);
+    const fenceMatch = FENCE_LINE.exec(line);
     if (fenceMatch) {
-      const fence = fenceMatch[1];
+      const [opening, indentation, fence] = fenceMatch;
       // The rest of the line is the info string; its first word, after any
       // spaces, is the language (CommonMark 0.31 §4.5).
-      const info = line.slice(fence.length).trim();
+      const info = line.slice(opening.length).trim();
       const language = info.match(/^(\S+)/)?.[1] ?? null;
       const legacyLanguage = info.match(/^(\w*)/)?.[1] || null;
       const meta =
@@ -3525,9 +3681,11 @@ function parseMarkdownImpl(
           ? undefined
           : info.slice(language.length).trim() || undefined;
       const codeLines: string[] = [];
+      // Each code line loses as much indentation as the opening fence has.
+      const fenceIndentation = new RegExp(`^ {0,${indentation.length}}`);
       index++;
-      while (index < lines.length && !lines[index].startsWith(fence)) {
-        codeLines.push(lines[index]);
+      while (index < lines.length && !closesFence(lines[index], fence)) {
+        codeLines.push(lines[index].replace(fenceIndentation, ''));
         index++;
       }
       index++; // skip closing fence
@@ -3995,8 +4153,7 @@ function findSettledBoundary(
   openFence: boolean;
   openMath: boolean;
 } {
-  let inFence = false;
-  let fenceMarker = '';
+  const fences = topLevelFences();
   let mathContainer: DisplayMathContainer | null = null;
   let suppressMathUntilBoundary = false;
   let lastBoundary = -1;
@@ -4006,16 +4163,8 @@ function findSettledBoundary(
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
     const line = lines[lineIndex];
 
-    if (inFence) {
-      const fenceMatch = line.match(/^(`{3,}|~{3,})/);
-      if (
-        fenceMatch &&
-        fenceMatch[1].startsWith(fenceMarker[0]) &&
-        fenceMatch[1].length >= fenceMarker.length
-      ) {
-        inFence = false;
-        fenceMarker = '';
-      }
+    if (fences.open) {
+      fences.read(lines, lineIndex);
       continue;
     }
 
@@ -4048,10 +4197,7 @@ function findSettledBoundary(
       }
     }
 
-    const fenceMatch = line.match(/^(`{3,}|~{3,})/);
-    if (fenceMatch) {
-      inFence = true;
-      fenceMarker = fenceMatch[1];
+    if (fences.read(lines, lineIndex) === 'open') {
       boundaryBeforeFence = lastBoundary;
       continue;
     }
@@ -4071,12 +4217,12 @@ function findSettledBoundary(
   }
 
   return {
-    boundary: inFence
+    boundary: fences.open
       ? boundaryBeforeFence
       : mathContainer != null
         ? boundaryBeforeMath
         : lastBoundary,
-    openFence: inFence,
+    openFence: fences.open,
     openMath: mathContainer != null,
   };
 }
@@ -4300,24 +4446,15 @@ export function trimStreamingArtifacts(
  */
 function trimOpenDisplayMath(text: string): string {
   const lines = text.split('\n');
-  let inFence = false;
-  let fenceMarker = '';
+  const fences = topLevelFences();
   let mathContainer: DisplayMathContainer | null = null;
   let suppressMathUntilBoundary = false;
   let mathStartLine = -1;
 
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];
-    if (inFence) {
-      const fence = line.match(/^(`{3,}|~{3,})/);
-      if (
-        fence != null &&
-        fence[1].startsWith(fenceMarker[0]) &&
-        fence[1].length >= fenceMarker.length
-      ) {
-        inFence = false;
-        fenceMarker = '';
-      }
+    if (fences.open) {
+      fences.read(lines, index);
       continue;
     }
     if (mathContainer != null) {
@@ -4339,10 +4476,7 @@ function trimOpenDisplayMath(text: string): string {
       suppressMathUntilBoundary = false;
     }
 
-    const fence = line.match(/^(`{3,}|~{3,})/);
-    if (fence != null) {
-      inFence = true;
-      fenceMarker = fence[1];
+    if (fences.read(lines, index) === 'open') {
       continue;
     }
     const container = suppressMathUntilBoundary
