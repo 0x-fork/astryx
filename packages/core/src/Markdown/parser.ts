@@ -3474,6 +3474,7 @@ function parseList(
     spread: loose || undefined,
     children: items,
   };
+  listMarkerShapes.set(node, `${baseIndent}:${ordered ? delim : bullet}`);
   return {node, nextIndex: index};
 }
 
@@ -3981,13 +3982,13 @@ function stampSourceRanges(
     // range that dropped it would slice to something that re-parses
     // differently.
     const end = lineStart(endLine) + lines[endLine].length;
-    blocks[i] = {
+    blocks[i] = withMarkerShapeOf(blocks[i], {
       ...blocks[i],
       position: {
         start: {offset: lineStart(startLine)},
         end: {offset: end},
       },
-    };
+    });
   }
 }
 
@@ -4563,6 +4564,48 @@ function atOffset(opts: ResolvedOptions, offset: number): ResolvedOptions {
 }
 
 /**
+ * Each list the block parser builds, keyed to its markers: their indentation
+ * and the bullet or delimiter. The full parse continues a list only with
+ * items at the same indentation with the same bullet or delimiter.
+ */
+const listMarkerShapes = new WeakMap<object, string>();
+
+/**
+ * Whether the full parse reads `next`, a blank line after `previous`, as more
+ * of the same list: both numbered or both bulleted, with the same delimiter,
+ * and — for lists the block parser built — markers at the same indentation
+ * with the same bullet. So `- a⏎⏎* b` and ` 1. a⏎⏎2. b` stay two lists.
+ */
+function continuesList(
+  previous: MarkdownAstList<RuntimeExtensionNode>,
+  next: MarkdownAstList<RuntimeExtensionNode>,
+): boolean {
+  if (
+    previous.ordered !== next.ordered ||
+    previous.delimiter !== next.delimiter
+  ) {
+    return false;
+  }
+  const previousShape = listMarkerShapes.get(previous);
+  const nextShape = listMarkerShapes.get(next);
+  return (
+    previousShape == null || nextShape == null || previousShape === nextShape
+  );
+}
+
+/** `merged`, carrying the marker shape of the list it continues. */
+function withMarkerShapeOf<Node extends object>(
+  list: object,
+  merged: Node,
+): Node {
+  const shape = listMarkerShapes.get(list);
+  if (shape != null) {
+    listMarkerShapes.set(merged, shape);
+  }
+  return merged;
+}
+
+/**
  * Concatenate freshly-parsed delta blocks with previously-settled blocks,
  * merging adjacent same-style lists into a single loose list. The boundary
  * detector settles each pre-blank segment independently, so without this
@@ -4581,8 +4624,7 @@ function mergeSettledBlocks(
   if (
     prevLast.type === 'list' &&
     deltaFirst.type === 'list' &&
-    prevLast.ordered === deltaFirst.ordered &&
-    prevLast.delimiter === deltaFirst.delimiter
+    continuesList(prevLast, deltaFirst)
   ) {
     const merged: MarkdownAstBlockContent<RuntimeExtensionNode> = {
       type: 'list',
@@ -4601,7 +4643,11 @@ function mergeSettledBlocks(
           }
         : null),
     };
-    return [...prev.slice(0, -1), merged, ...delta.slice(1)];
+    return [
+      ...prev.slice(0, -1),
+      withMarkerShapeOf(prevLast, merged),
+      ...delta.slice(1),
+    ];
   }
   return [...prev, ...delta];
 }
@@ -4623,10 +4669,9 @@ function appendSettledBlocks(
   if (
     prevLast.type === 'list' &&
     deltaFirst.type === 'list' &&
-    prevLast.ordered === deltaFirst.ordered &&
-    prevLast.delimiter === deltaFirst.delimiter
+    continuesList(prevLast, deltaFirst)
   ) {
-    prev[prev.length - 1] = {
+    prev[prev.length - 1] = withMarkerShapeOf(prevLast, {
       type: 'list',
       ordered: prevLast.ordered,
       start: prevLast.start,
@@ -4641,7 +4686,7 @@ function appendSettledBlocks(
             },
           }
         : null),
-    };
+    });
     prev.push(...delta.slice(1));
     return true;
   }
