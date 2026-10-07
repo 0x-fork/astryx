@@ -377,10 +377,9 @@ export function useTableGroupedRows<T extends Record<string, unknown>>(
           htmlProps: {
             ...props.htmlProps,
             // Convenience: clicking anywhere on the row toggles it. The chevron
-            // button below is the accessible, keyboard-operable control, so the
-            // row keeps its implicit `row` role (no role override here).
+            // button below owns the disclosure state and keyboard interaction;
+            // the native row keeps only its implicit row semantics.
             onClick: toggle,
-            'aria-expanded': !collapsed,
           },
           xstyle: [...props.xstyle, styles.headerRow],
           children: (
