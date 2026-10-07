@@ -1151,11 +1151,350 @@ function findClosingParen(text: string, start: number): number {
   return -1;
 }
 
-function isWordChar(ch: string | undefined): boolean {
-  if (ch == null) {
-    return false;
+// ---------------------------------------------------------------------------
+// Emphasis and strong (CommonMark 0.31 §6.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Adds `value` to the last text node of `nodes`, unless that node is a
+ * delimiter run, which stays its own node until emphasis is resolved.
+ */
+function appendInlineText(
+  nodes: MarkdownAstPhrasingContent<RuntimeExtensionNode>[],
+  delimiterNodes: ReadonlySet<object> | null,
+  value: string,
+): void {
+  const last = nodes[nodes.length - 1];
+  if (last?.type === 'text' && delimiterNodes?.has(last) !== true) {
+    nodes[nodes.length - 1] = {...last, value: last.value + value};
+  } else {
+    nodes.push({type: 'text', value});
   }
-  return /\w/.test(ch);
+}
+
+type PhrasingNode = MarkdownAstPhrasingContent<RuntimeExtensionNode>;
+
+/** A run of `*` or `_`: what it can do, and how many delimiters are left. */
+interface DelimiterRun {
+  /** The run's text node; its text shrinks as delimiters are used. */
+  readonly node: {type: 'text'; value: string};
+  readonly character: '*' | '_';
+  readonly originalLength: number;
+  length: number;
+  readonly canOpen: boolean;
+  readonly canClose: boolean;
+}
+
+const UNICODE_WHITESPACE = /^[\t\n\f\r\p{Zs}]$/u;
+const UNICODE_PUNCTUATION = /^[\p{P}\p{S}]$/u;
+
+/** The character before `index` (a whole code point), if any. */
+function characterBefore(text: string, index: number): string | undefined {
+  if (index <= 0) {
+    return undefined;
+  }
+  const low = text.charCodeAt(index - 1);
+  if (low >= 0xdc00 && low <= 0xdfff && index >= 2) {
+    const high = text.charCodeAt(index - 2);
+    if (high >= 0xd800 && high <= 0xdbff) {
+      return text.slice(index - 2, index);
+    }
+  }
+  return text[index - 1];
+}
+
+/** The character at `index` (a whole code point), if any. */
+function characterAt(text: string, index: number): string | undefined {
+  if (index >= text.length) {
+    return undefined;
+  }
+  const codePoint = text.codePointAt(index);
+  return codePoint == null ? undefined : String.fromCodePoint(codePoint);
+}
+
+/**
+ * The delimiter run `text.slice(start, end)`: left- or right-flanking by the
+ * characters around it, and whether it can open or close emphasis — an
+ * underscore run only where it is not inside a word.
+ */
+function delimiterRun(
+  character: '*' | '_',
+  text: string,
+  start: number,
+  end: number,
+): DelimiterRun {
+  const before = characterBefore(text, start);
+  const after = characterAt(text, end);
+  // The start and end of the text count as whitespace.
+  const isSpaceBefore = before == null || UNICODE_WHITESPACE.test(before);
+  const isSpaceAfter = after == null || UNICODE_WHITESPACE.test(after);
+  const isPunctuationBefore =
+    before != null && UNICODE_PUNCTUATION.test(before);
+  const isPunctuationAfter = after != null && UNICODE_PUNCTUATION.test(after);
+  const isLeftFlanking =
+    !isSpaceAfter &&
+    (!isPunctuationAfter || isSpaceBefore || isPunctuationBefore);
+  const isRightFlanking =
+    !isSpaceBefore &&
+    (!isPunctuationBefore || isSpaceAfter || isPunctuationAfter);
+  return {
+    node: {type: 'text', value: text.slice(start, end)},
+    character,
+    originalLength: end - start,
+    length: end - start,
+    canOpen:
+      character === '*'
+        ? isLeftFlanking
+        : isLeftFlanking && (!isRightFlanking || isPunctuationBefore),
+    canClose:
+      character === '*'
+        ? isRightFlanking
+        : isRightFlanking && (!isLeftFlanking || isPunctuationAfter),
+  };
+}
+
+/**
+ * The deepest emphasis and strong may nest. Pairs that would nest deeper stay
+ * text, as other CommonMark parsers cap nesting, so a hostile input cannot
+ * build a tree that overflows the stack of a recursive walk or render.
+ */
+const MAX_EMPHASIS_DEPTH = 100;
+
+interface Entry {
+  node: PhrasingNode;
+  previous: Entry | null;
+  next: Entry | null;
+}
+
+/**
+ * Pairs the delimiter runs of one inline text into emphasis and strong, as
+ * CommonMark's process-emphasis procedure does: each closer, in order, takes
+ * the nearest opener of its character that the rule of three allows, two
+ * delimiters for strong when both have two, else one for emphasis, and the
+ * nodes between them become its children. A run left unpaired stays text,
+ * joined to the text beside it. `***x***` keeps strong outside emphasis, as
+ * Markdown has always drawn it. Runs are taken off a linked stack as they
+ * are used or passed, so the pass is linear in the number of runs, and
+ * nesting stops at MAX_EMPHASIS_DEPTH.
+ */
+function resolveEmphasis(
+  nodes: ReadonlyArray<PhrasingNode>,
+  delimiters: ReadonlyArray<DelimiterRun>,
+): PhrasingNode[] {
+  const head: Entry = {
+    node: {type: 'text', value: ''},
+    previous: null,
+    next: null,
+  };
+  let tail = head;
+  const entryOf = new Map<object, Entry>();
+  for (const node of nodes) {
+    const entry: Entry = {node, previous: tail, next: null};
+    tail.next = entry;
+    tail = entry;
+    entryOf.set(node, entry);
+  }
+  const unlink = (entry: Entry): void => {
+    if (entry.previous != null) {
+      entry.previous.next = entry.next;
+    }
+    if (entry.next != null) {
+      entry.next.previous = entry.previous;
+    }
+  };
+  // The delimiter stack, as a doubly linked list in source order: a run
+  // leaves it once used up, paired across, or unable to pair, so every
+  // search below visits only runs still on it, and the whole pass is linear.
+  interface StackRun {
+    readonly run: DelimiterRun;
+    readonly index: number;
+    previous: StackRun | null;
+    next: StackRun | null;
+    /** The deepest emphasis among the nodes after this run, up to the next. */
+    depthAfter: number;
+    canClose: boolean;
+  }
+  const stack: StackRun[] = delimiters.map((run, index) => ({
+    run,
+    index,
+    previous: null,
+    next: null,
+    depthAfter: 0,
+    canClose: run.canClose,
+  }));
+  stack.forEach((item, index) => {
+    item.previous = stack[index - 1] ?? null;
+    item.next = stack[index + 1] ?? null;
+  });
+  // Takes a run off the stack; what followed it now follows the one before.
+  const leave = (item: StackRun): void => {
+    if (item.previous != null) {
+      item.previous.next = item.next;
+      item.previous.depthAfter = Math.max(
+        item.previous.depthAfter,
+        item.depthAfter,
+      );
+    }
+    if (item.next != null) {
+      item.next.previous = item.previous;
+    }
+  };
+  // Where the search for an opener stops, by source index, for closers of
+  // each kind: no opener at or before it can match them.
+  const openersBottom = new Map<string, number>();
+  // The strong a pair of runs made last, to keep `***x***` strong outside.
+  let lastStrong: {
+    readonly node: PhrasingNode;
+    readonly opener: DelimiterRun;
+    readonly closer: DelimiterRun;
+  } | null = null;
+  let closerItem: StackRun | null = stack[0] ?? null;
+  while (closerItem != null) {
+    const closer = closerItem.run;
+    if (!closerItem.canClose || closer.length === 0) {
+      closerItem = closerItem.next;
+      continue;
+    }
+    const key = `${closer.character}${closer.canOpen ? 1 : 0}${closer.originalLength % 3}`;
+    const bottom = openersBottom.get(key) ?? -1;
+    let openerItem: StackRun | null = closerItem.previous;
+    for (; openerItem != null && openerItem.index > bottom;) {
+      const candidate = openerItem.run;
+      // The rule of three: a run that can both open and close does not pair
+      // with one whose lengths sum to a multiple of three, unless both are.
+      const isOddMatch =
+        (closer.canOpen || candidate.canClose) &&
+        (candidate.originalLength + closer.originalLength) % 3 === 0 &&
+        !(
+          candidate.originalLength % 3 === 0 && closer.originalLength % 3 === 0
+        );
+      if (
+        candidate.character === closer.character &&
+        candidate.canOpen &&
+        candidate.length > 0 &&
+        !isOddMatch
+      ) {
+        break;
+      }
+      openerItem = openerItem.previous;
+    }
+    if (openerItem == null || openerItem.index <= bottom) {
+      openersBottom.set(key, closerItem.index - 1);
+      const next: StackRun | null = closerItem.next;
+      if (!closer.canOpen) {
+        leave(closerItem);
+      }
+      closerItem = next;
+      continue;
+    }
+    const opener = openerItem.run;
+    // Runs between the pair can no longer pair: take them off the stack, and
+    // note the deepest emphasis among the nodes between.
+    let innerDepth = openerItem.depthAfter;
+    for (
+      let between = openerItem.next;
+      between != null && between !== closerItem;
+      between = between.next
+    ) {
+      innerDepth = Math.max(innerDepth, between.depthAfter);
+    }
+    openerItem.next = closerItem;
+    closerItem.previous = openerItem;
+    openerItem.depthAfter = innerDepth;
+    if (innerDepth >= MAX_EMPHASIS_DEPTH) {
+      // Nesting deeper than the cap: both runs stay text, so no input can
+      // build a tree deep enough to exhaust the stack of whatever walks it.
+      const next: StackRun | null = closerItem.next;
+      leave(openerItem);
+      closerItem.canClose = false;
+      if (!closer.canOpen) {
+        leave(closerItem);
+      }
+      closerItem = next;
+      continue;
+    }
+    const openerEntry = entryOf.get(opener.node);
+    const closerEntry = entryOf.get(closer.node);
+    if (openerEntry == null || closerEntry == null) {
+      break;
+    }
+    const use = opener.length >= 2 && closer.length >= 2 ? 2 : 1;
+    const children: PhrasingNode[] = [];
+    for (
+      let entry = openerEntry.next;
+      entry != null && entry !== closerEntry;
+      entry = entry.next
+    ) {
+      children.push(entry.node);
+    }
+    let wrapper: PhrasingNode;
+    if (use === 2) {
+      wrapper = {type: 'strong', children};
+      lastStrong = {node: wrapper, opener, closer};
+    } else {
+      const [only] = children;
+      wrapper =
+        children.length === 1 &&
+        only === lastStrong?.node &&
+        lastStrong.opener === opener &&
+        lastStrong.closer === closer &&
+        only.type === 'strong'
+          ? {
+              type: 'strong',
+              children: [{type: 'emphasis', children: only.children}],
+            }
+          : {type: 'emphasis', children};
+    }
+    const wrapperEntry: Entry = {
+      node: wrapper,
+      previous: openerEntry,
+      next: closerEntry,
+    };
+    openerEntry.next = wrapperEntry;
+    closerEntry.previous = wrapperEntry;
+    openerItem.depthAfter = innerDepth + 1;
+    opener.length -= use;
+    closer.length -= use;
+    opener.node.value = opener.character.repeat(opener.length);
+    closer.node.value = closer.character.repeat(closer.length);
+    if (opener.length === 0) {
+      unlink(openerEntry);
+      leave(openerItem);
+    }
+    if (closer.length === 0) {
+      unlink(closerEntry);
+      const next: StackRun | null = closerItem.next;
+      leave(closerItem);
+      closerItem = next;
+    }
+  }
+  // An unpaired run is text, joined to the text beside it.
+  const leftover = new Set<object>(
+    delimiters.filter(run => run.length > 0).map(run => run.node),
+  );
+  const result: PhrasingNode[] = [];
+  let previousIsLeftover = false;
+  for (let entry = head.next; entry != null; entry = entry.next) {
+    const {node} = entry;
+    const isLeftover = leftover.has(node);
+    const last = result[result.length - 1];
+    if (
+      node.type === 'text' &&
+      last?.type === 'text' &&
+      (isLeftover || previousIsLeftover)
+    ) {
+      result[result.length - 1] = {...last, value: last.value + node.value};
+      previousIsLeftover = true;
+      continue;
+    }
+    result.push(
+      isLeftover
+        ? {type: 'text', value: (node as {value: string}).value}
+        : node,
+    );
+    previousIsLeftover = isLeftover;
+  }
+  return result;
 }
 
 /** True when the character at `index` is preceded by an odd backslash run. */
@@ -1547,6 +1886,10 @@ function parseInlineImpl(
   context: 'default' | 'tableCell' = 'default',
 ): MarkdownAstPhrasingContent<RuntimeExtensionNode>[] {
   const nodes: MarkdownAstPhrasingContent<RuntimeExtensionNode>[] = [];
+  // Runs of `*` and `_`, in order; each is also a text node in `nodes` until
+  // resolveEmphasis pairs it. Created only when a run appears.
+  let delimiters: DelimiterRun[] | null = null;
+  let delimiterNodes: Set<object> | null = null;
   // Only a plugin that actually contributes INLINE syntax may cost anything
   // per source position. A transform-only list contributes none, so it takes
   // the same path as an omitted or empty one: no candidate probe per
@@ -1700,66 +2043,29 @@ function parseInlineImpl(
       }
     }
 
-    // --- Bold-italic: *** or ___ ---
-    if (
-      (text[i] === '*' && text[i + 1] === '*' && text[i + 2] === '*') ||
-      (text[i] === '_' && text[i + 1] === '_' && text[i + 2] === '_')
-    ) {
-      const marker = text.slice(i, i + 3);
-      const isUnderscore = text[i] === '_';
-      if (isUnderscore && isWordChar(text[i - 1])) {
-        // mid-word underscore — fall through
-      } else {
-        const closeIndex = text.indexOf(marker, i + 3);
-        if (
-          closeIndex !== -1 &&
-          (!isUnderscore || !isWordChar(text[closeIndex + 3]))
-        ) {
-          nodes.push({
-            type: 'strong',
-            children: [
-              {
-                type: 'emphasis',
-                children: parseInlineImpl(
-                  text.slice(i + 3, closeIndex),
-                  opts,
-                  context,
-                ),
-              },
-            ],
-          });
-          i = closeIndex + 3;
-          continue;
-        }
+    // --- Emphasis and strong: a run of `*` or `_` is a delimiter run,
+    // paired with the others once the whole text is read (CommonMark 0.31
+    // §6.2; see resolveEmphasis). ---
+    if (text[i] === '*' || text[i] === '_') {
+      const character = text[i] as '*' | '_';
+      let runEnd = i + 1;
+      while (text[runEnd] === character) {
+        runEnd++;
       }
-    }
-
-    // --- Bold: ** or __ ---
-    if (
-      (text[i] === '*' && text[i + 1] === '*') ||
-      (text[i] === '_' && text[i + 1] === '_')
-    ) {
-      const marker = text.slice(i, i + 2);
-      const isUnderscore = text[i] === '_';
-      if (isUnderscore && isWordChar(text[i - 1])) {
-        // mid-word underscore — fall through
-      } else {
-        const closeIndex = text.indexOf(marker, i + 2);
-        if (
-          closeIndex !== -1 &&
-          (!isUnderscore || !isWordChar(text[closeIndex + 2]))
-        ) {
-          nodes.push({
-            type: 'strong',
-            children: parseInlineImpl(
-              text.slice(i + 2, closeIndex),
-              opts,
-              context,
-            ),
-          });
-          i = closeIndex + 2;
-          continue;
-        }
+      const run = delimiterRun(character, text, i, runEnd);
+      if (run.canOpen || run.canClose) {
+        nodes.push(run.node);
+        (delimiters ??= []).push(run);
+        (delimiterNodes ??= new Set()).add(run.node);
+        i = runEnd;
+        continue;
+      }
+      // A run that can neither open nor close is text; a plugin that starts
+      // with it may still read it below.
+      if (inlineExtensionStarts?.has(character) !== true) {
+        appendInlineText(nodes, delimiterNodes, text.slice(i, runEnd));
+        i = runEnd;
+        continue;
       }
     }
 
@@ -1777,32 +2083,6 @@ function parseInlineImpl(
         });
         i = closeIndex + 2;
         continue;
-      }
-    }
-
-    // --- Italic: * or _ ---
-    if (text[i] === '*' || text[i] === '_') {
-      const isUnderscore = text[i] === '_';
-      if (isUnderscore && isWordChar(text[i - 1])) {
-        // mid-word underscore — fall through
-      } else {
-        const closeIndex = text.indexOf(text[i], i + 1);
-        if (
-          closeIndex !== -1 &&
-          closeIndex > i + 1 &&
-          (!isUnderscore || !isWordChar(text[closeIndex + 1]))
-        ) {
-          nodes.push({
-            type: 'emphasis',
-            children: parseInlineImpl(
-              text.slice(i + 1, closeIndex),
-              opts,
-              context,
-            ),
-          });
-          i = closeIndex + 1;
-          continue;
-        }
       }
     }
 
@@ -1825,15 +2105,7 @@ function parseInlineImpl(
     if (text[i] === '&') {
       const reference = matchCharacterReference(text, i);
       if (reference != null) {
-        const last = nodes[nodes.length - 1];
-        if (last?.type === 'text') {
-          nodes[nodes.length - 1] = {
-            ...last,
-            value: last.value + reference.value,
-          };
-        } else {
-          nodes.push({type: 'text', value: reference.value});
-        }
+        appendInlineText(nodes, delimiterNodes, reference.value);
         i = reference.end;
         continue;
       }
@@ -1861,15 +2133,7 @@ function parseInlineImpl(
       const trimmed = line.replace(/ +$/, '');
       if (line.length - trimmed.length >= 2) {
         if (trimmed.length > 0) {
-          const last = nodes[nodes.length - 1];
-          if (last?.type === 'text') {
-            nodes[nodes.length - 1] = {
-              ...last,
-              value: last.value + trimmed,
-            };
-          } else {
-            nodes.push({type: 'text', value: trimmed});
-          }
+          appendInlineText(nodes, delimiterNodes, trimmed);
         }
         nodes.push({type: 'break'});
         i = end + 1;
@@ -1877,15 +2141,10 @@ function parseInlineImpl(
       }
     }
 
-    const last = nodes[nodes.length - 1];
-    if (last?.type === 'text') {
-      nodes[nodes.length - 1] = {...last, value: last.value + content};
-    } else {
-      nodes.push({type: 'text', value: content});
-    }
+    appendInlineText(nodes, delimiterNodes, content);
     i = end;
   }
-  return nodes;
+  return delimiters == null ? nodes : resolveEmphasis(nodes, delimiters);
 }
 
 // ---------------------------------------------------------------------------
@@ -3477,15 +3736,22 @@ export function trimStreamingArtifacts(
         }
       }
     }
-    // Append closing markers for each unpaired opener (in reverse order)
+    // Append closing markers for each unpaired opener (in reverse order),
+    // before any trailing whitespace: a closer must follow content to close
+    // (CommonMark's flanking rules), so `**bold ` closes as `**bold** `.
     for (let i = markers.length - 1; i >= 0; i--) {
       if (!paired.has(i)) {
         const marker = markers[i];
+        const content = tail.slice(marker.pos + marker.len);
+        const trailing = content.length - content.trimEnd().length;
         // Only close if there's actual content after the opener
-        if (marker.pos + marker.len < tail.length) {
-          tail = tail + '*'.repeat(marker.len);
+        if (trailing < content.length) {
+          tail =
+            tail.slice(0, tail.length - trailing) +
+            '*'.repeat(marker.len) +
+            tail.slice(tail.length - trailing);
         } else {
-          // Trailing marker with no content — trim it
+          // A marker with nothing but whitespace after it — trim it
           tail = tail.slice(0, marker.pos);
         }
       }
