@@ -254,11 +254,38 @@ export function MonthEventPill({
   timezoneID: string;
   isPast?: boolean;
 }) {
-  const {categories, locale} = useScheduleContext();
+  const {locale} = useScheduleContext();
+  // A month chip shows its start time after the title (component:Schedule
+  // FR18).
+  return (
+    <TitleFirstPill
+      event={event}
+      timeLabel={
+        isDayEvent(event)
+          ? null
+          : formatEventStartTime(event, timezoneID, locale)
+      }
+      isPast={isPast}
+    />
+  );
+}
+
+/**
+ * A pill that leads with the event's title; its time follows on the same
+ * line only when the whole title and the time fit, and otherwise the title
+ * shows alone, ellipsized.
+ */
+export function TitleFirstPill({
+  event,
+  timeLabel,
+  isPast = false,
+}: {
+  event: CalendarEvent;
+  timeLabel: string | null;
+  isPast?: boolean;
+}) {
+  const {categories} = useScheduleContext();
   const category = getEventCategory(event, categories);
-  const timeLabel = isDayEvent(event)
-    ? null
-    : formatEventStartTime(event, timezoneID, locale);
   return (
     <span
       {...stylex.props(
@@ -267,18 +294,23 @@ export function MonthEventPill({
           ? eventPastSurfaceColorStyle(category.color)
           : eventSurfaceColorStyle(category.color),
       )}>
-      {timeLabel != null && (
-        <Text type="supporting" color="inherit" xstyle={styles.eventTime}>
-          <ScheduleTime>{timeLabel}</ScheduleTime>
+      <span {...stylex.props(styles.titleFirstLine)}>
+        <Text
+          type="supporting"
+          color="inherit"
+          weight="bold"
+          xstyle={styles.titleFirstTitle}>
+          {event.title}
         </Text>
-      )}
-      <Text
-        type="supporting"
-        color="inherit"
-        weight="bold"
-        xstyle={styles.eventTitle}>
-        {event.title}
-      </Text>
+        {timeLabel != null && (
+          <Text
+            type="supporting"
+            color="inherit"
+            xstyle={styles.titleFirstTime}>
+            <ScheduleTime>{timeLabel}</ScheduleTime>
+          </Text>
+        )}
+      </span>
     </span>
   );
 }
@@ -904,6 +936,33 @@ export const styles = stylex.create({
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     flexShrink: 0,
+    opacity: 0.8,
+  },
+  // A chip that leads with its title is one line tall. Its title and time
+  // wrap as a flex row, so the time drops to a second, clipped line whenever
+  // the whole title and the time do not fit side by side: layout, not
+  // script, decides whether the time shows (component:Schedule FR18, PR5).
+  titleFirstLine: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'baseline',
+    columnGap: spacingVars['--spacing-1'],
+    flexGrow: 1,
+    minWidth: 0,
+    blockSize: `calc(${typeScaleVars['--text-supporting-size']} * ${typeScaleVars['--text-supporting-leading']})`,
+    overflow: 'hidden',
+  },
+  // Alone on the line, a long title shrinks and ellipsizes.
+  titleFirstTitle: {
+    minWidth: 0,
+    maxWidth: '100%',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  titleFirstTime: {
+    flexShrink: 0,
+    whiteSpace: 'nowrap',
     opacity: 0.8,
   },
   moreEvents: {
