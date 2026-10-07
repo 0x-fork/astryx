@@ -152,7 +152,7 @@ describe('Schedule', () => {
     );
 
     expect(screen.getByRole('heading', {name: 'mai 2026'})).toBeInTheDocument();
-    expect(screen.getByRole('grid', {name: 'mai 2026'})).toBeInTheDocument();
+    expect(screen.getByRole('table', {name: 'mai 2026'})).toBeInTheDocument();
     expect(
       screen.getByRole('columnheader', {name: 'mercredi'}),
     ).toBeInTheDocument();
@@ -317,7 +317,7 @@ describe('Schedule', () => {
     expect(screen.getByRole('region', {name: 'May 2026'})).toBeInTheDocument();
   });
 
-  it('exposes monthly view as an ARIA grid', () => {
+  it('exposes the month view as a table with week row headers and date-named cells', () => {
     render(
       <Schedule
         view={createScheduleMonthlyView()}
@@ -329,18 +329,29 @@ describe('Schedule', () => {
       />,
     );
 
-    expect(screen.getByRole('grid', {name: 'May 2026'})).toBeInTheDocument();
+    // component:Schedule AR7: a table, not an interactive grid.
+    const table = screen.getByRole('table', {name: 'May 2026'});
+    expect(table).not.toHaveAttribute('aria-readonly');
+    expect(screen.queryByRole('grid')).toBeNull();
+    expect(
+      screen.getAllByRole('columnheader').map(header => header.textContent),
+    ).toEqual(['Week', 'Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']);
     expect(
       screen.getByRole('columnheader', {name: 'Wednesday'}),
+    ).toHaveAttribute('aria-colindex', '5');
+    const rowHeaders = screen.getAllByRole('rowheader');
+    expect(rowHeaders).toHaveLength(6);
+    expect(rowHeaders[2].textContent).toMatch(/^May 10\s*–\s*16, 2026$/);
+    expect(screen.getAllByRole('row')).toHaveLength(7);
+    for (const row of screen.getAllByRole('row').slice(1)) {
+      expect(row.querySelectorAll('[role="rowheader"]')).toHaveLength(1);
+      expect(row.querySelectorAll('[role="cell"]')).toHaveLength(7);
+    }
+    expect(
+      screen.getByRole('cell', {name: 'Wednesday, May 13, 2026'}),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole('columnheader', {name: 'Wednesday'}),
-    ).toHaveAttribute('aria-colindex', '4');
-    expect(
-      screen.getByRole('gridcell', {name: 'Wednesday, May 13, 2026'}),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('gridcell', {name: 'Wednesday, May 13, 2026'}),
+      screen.getByRole('cell', {name: 'Wednesday, May 13, 2026'}),
     ).toHaveAttribute('aria-current', 'date');
     expect(
       screen.getByText('Visible sync, Sync, 4:00 PM - 4:30 PM'),
@@ -350,9 +361,9 @@ describe('Schedule', () => {
     ).toBeInTheDocument();
   });
 
-  it('makes the scrollable monthly grid keyboard-focusable', () => {
-    // The month grid is a horizontal scroll container with no focusable
-    // descendants, so it needs tabindex="0" itself for
+  it('makes the scrollable month table keyboard-focusable', () => {
+    // The month table is a horizontal scroll container that may hold no
+    // focusable descendants, so it needs tabindex="0" itself for
     // scrollable-region-focusable to pass and for keyboard scrolling.
     render(
       <Schedule
@@ -365,7 +376,7 @@ describe('Schedule', () => {
       />,
     );
 
-    expect(screen.getByRole('grid', {name: 'May 2026'})).toHaveAttribute(
+    expect(screen.getByRole('table', {name: 'May 2026'})).toHaveAttribute(
       'tabindex',
       '0',
     );
@@ -967,5 +978,202 @@ describe('Schedule event popover', () => {
     const earlier = screen.getByRole('button', {name: /^Earlier sync/});
     fireEvent.click(earlier);
     expect(dialogOf(earlier)).toHaveTextContent('Details for Earlier sync');
+  });
+});
+
+describe('Schedule month overflow', () => {
+  // component:Schedule FR15–FR17 and AR7. May 2026 in UTC: Wednesday May 13
+  // holds five events and needs five levels; Friday May 15 holds four.
+  const categories: ScheduleCategory[] = [
+    {label: 'Company', color: 'blue'},
+    {label: 'Launch', color: 'green'},
+  ];
+  const timed = (id: string, title: string, day: number, hour: number) =>
+    createEventFromISO({
+      id,
+      title,
+      category: 'Company',
+      start: `2026-05-${day}T${String(hour).padStart(2, '0')}:00:00.000Z`,
+      end: `2026-05-${day}T${String(hour + 1).padStart(2, '0')}:00:00.000Z`,
+    });
+  const events: CalendarEvent[] = [
+    createEventFromISO({
+      id: 'conference',
+      title: 'Conference',
+      category: 'Launch',
+      start: '2026-05-10',
+      end: '2026-05-13',
+    }),
+    createEventFromISO({
+      id: 'hack-week',
+      title: 'Hack week',
+      category: 'Launch',
+      start: '2026-05-10',
+      end: '2026-05-12',
+    }),
+    createEventFromISO({
+      id: 'offsite',
+      title: 'Offsite',
+      category: 'Company',
+      start: '2026-05-11',
+      end: '2026-05-13',
+    }),
+    timed('alpha', 'Alpha review', 13, 9),
+    timed('bravo', 'Bravo sync', 13, 11),
+    timed('charlie', 'Charlie demo', 13, 14),
+    timed('friday-1', 'Friday one', 15, 9),
+    timed('friday-2', 'Friday two', 15, 10),
+    timed('friday-3', 'Friday three', 15, 11),
+    timed('friday-4', 'Friday four', 15, 12),
+  ];
+
+  function MonthAt({source = events}: {source?: ReadonlyArray<CalendarEvent>}) {
+    const [date, setDate] = useState<Instant>(Date.UTC(2026, 4, 13));
+    const view = useMemo(() => createScheduleMonthlyView(), []);
+    return (
+      <Schedule
+        view={view}
+        events={source}
+        categories={categories}
+        date={date}
+        focusDate={Date.UTC(2026, 4, 13)}
+        onChangeDate={setDate}
+        timezoneID="UTC"
+      />
+    );
+  }
+
+  function dialogOf(button: HTMLElement): HTMLElement {
+    const layer = document.getElementById(
+      button.getAttribute('aria-controls') ?? '',
+    );
+    expect(layer).not.toBeNull();
+    const dialog =
+      layer?.getAttribute('role') === 'dialog'
+        ? layer
+        : layer?.querySelector<HTMLElement>('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    return dialog as HTMLElement;
+  }
+
+  it('gives a busy day a named "+N more" button in its cell', () => {
+    render(<MonthAt />);
+    const wednesday = screen.getByRole('button', {
+      name: '3 more events, Wednesday, May 13, 2026',
+    });
+    expect(wednesday).toHaveTextContent('+3 more');
+    expect(wednesday).toHaveAttribute('type', 'button');
+    expect(wednesday).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(wednesday).toHaveAttribute('aria-expanded', 'false');
+    expect(wednesday.getAttribute('aria-controls')).toBeTruthy();
+    expect(wednesday.closest('[role="cell"]')).toHaveAttribute(
+      'aria-label',
+      'Wednesday, May 13, 2026',
+    );
+    expect(wednesday.closest('[aria-hidden="true"]')).toBeNull();
+    expect(
+      screen.getByRole('button', {name: '2 more events, Friday, May 15, 2026'}),
+    ).toHaveTextContent('+2 more');
+    // Monday needs three levels and Thursday one: nothing is counted there.
+    expect(screen.getAllByRole('button', {name: /more events?,/})).toHaveLength(
+      2,
+    );
+    // The cell's hidden list still names every event of the busy day.
+    const cell = wednesday.closest('[role="cell"]') as HTMLElement;
+    expect(cell.querySelectorAll('li')).toHaveLength(5);
+  });
+
+  it('opens one popover named by the day that lists every event of it, switches days, and closes on Escape', () => {
+    render(<MonthAt />);
+    const wednesday = screen.getByRole('button', {name: /^3 more events,/});
+    const friday = screen.getByRole('button', {name: /^2 more events,/});
+
+    fireEvent.click(wednesday);
+    expect(wednesday).toHaveAttribute('aria-expanded', 'true');
+    const dialog = dialogOf(wednesday);
+    expect(dialog).toHaveAttribute('aria-label', 'Wednesday, May 13, 2026');
+    expect(
+      Array.from(dialog.querySelectorAll('li')).map(item => item.textContent),
+    ).toEqual([
+      'All dayConference',
+      'All dayOffsite',
+      '9:00 AM - 10:00 AM' + 'Alpha review',
+      '11:00 AM - 12:00 PM' + 'Bravo sync',
+      '2:00 PM - 3:00 PM' + 'Charlie demo',
+    ]);
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+
+    // A press on another day's button closes the popover ahead of the
+    // browser's light dismiss; the click that follows opens that day.
+    fireEvent.pointerDown(friday);
+    expect(wednesday).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(friday);
+    expect(friday).toHaveAttribute('aria-expanded', 'true');
+    expect(dialogOf(friday)).toHaveAttribute(
+      'aria-label',
+      'Friday, May 15, 2026',
+    );
+    expect(dialogOf(friday).querySelectorAll('li')).toHaveLength(4);
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(1);
+
+    fireEvent.keyDown(dialogOf(friday), {key: 'Escape'});
+    expect(friday).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('closes when the open day is pressed again, dismissed, or paged away', () => {
+    render(<MonthAt />);
+    const wednesday = screen.getByRole('button', {name: /^3 more events,/});
+    fireEvent.pointerDown(wednesday);
+    fireEvent.click(wednesday);
+    expect(wednesday).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.pointerDown(wednesday);
+    fireEvent.click(wednesday);
+    expect(wednesday).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(wednesday);
+    expect(wednesday).toHaveAttribute('aria-expanded', 'true');
+    const layer = document.getElementById(
+      wednesday.getAttribute('aria-controls') ?? '',
+    ) as HTMLElement;
+    const toggle = new Event('toggle');
+    Object.defineProperty(toggle, 'newState', {value: 'closed'});
+    fireEvent(layer, toggle);
+    expect(wednesday).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(wednesday);
+    expect(dialogOf(wednesday)).toHaveAttribute(
+      'aria-label',
+      'Wednesday, May 13, 2026',
+    );
+    fireEvent.click(screen.getByRole('button', {name: 'Next month'}));
+    expect(screen.queryByRole('button', {name: /more events?,/})).toBeNull();
+    expect(screen.queryByText('Alpha review')).toBeNull();
+  });
+
+  it('closes when the open day stops being busy and moves focus to that day', () => {
+    const {rerender} = render(<MonthAt />);
+    const friday = screen.getByRole('button', {name: /^2 more events,/});
+    fireEvent.click(friday);
+    expect(friday).toHaveAttribute('aria-expanded', 'true');
+    // Focus is inside the open dialog, as Popover's auto-focus leaves it.
+    const dialog = dialogOf(friday);
+    const focusTarget = dialog.querySelector<HTMLElement>('button, [tabindex]');
+    (focusTarget ?? dialog).focus();
+    rerender(
+      <MonthAt source={events.filter(event => event.id !== 'friday-4')} />,
+    );
+    expect(
+      screen.queryByRole('button', {name: /Friday, May 15, 2026$/}),
+    ).toBeNull();
+    expect(document.querySelector('[role="dialog"] li')).toBeNull();
+    expect(document.activeElement).toBe(
+      screen.getByRole('cell', {name: 'Friday, May 15, 2026'}),
+    );
+  });
+
+  it('adds no button to a month whose days fit in three levels', () => {
+    render(<MonthAt source={events.slice(0, 4)} />);
+    expect(screen.queryByRole('button', {name: /more events?,/})).toBeNull();
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });
