@@ -15,7 +15,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import {resolveCore} from '../_adapter.mjs';
+import {resolveComponentReplacement, resolveCore} from '../_adapter.mjs';
 import {assertWithin, sanitizeName, PathSafetyError} from '../../../foundation/fs/path-safety.mjs';
 import {checkGhCli} from '../_github.mjs';
 import {Project} from '../../../foundation/config/project.mjs';
@@ -221,6 +221,26 @@ export async function swizzleCopy(component, options = {}) {
   const coreIssuesUrl = project
     ? project.issuesUrl({package: CORE_PACKAGE})
     : undefined;
+  // An active integration replacement answers to the Core name it replaces,
+  // bare or qualified by its own package (spec:AST-035 FR11): copy it under its
+  // own name. `--package @astryxdesign/core` still copies the Core original.
+  if (pkg !== CORE_PACKAGE) {
+    const replacement = await resolveComponentReplacement(
+      coreDir,
+      loadedIntegrations,
+      dirName,
+    );
+    if (
+      replacement &&
+      (!pkg || (pkg === replacement.package && replacement.name !== dirName))
+    ) {
+      return swizzleCopy(replacement.name, {
+        ...options,
+        package: replacement.package,
+      });
+    }
+  }
+
   const allOwners = resolveOwners(coreDir, loadedIntegrations, dirName, coreIssuesUrl);
 
   if (allOwners.length === 0) {
