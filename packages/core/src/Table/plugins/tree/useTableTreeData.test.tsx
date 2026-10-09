@@ -304,7 +304,10 @@ describe('useTableTreeData — row-click expansion', () => {
         data: fileTree,
         idKey: 'id',
       });
-      const tree = useTableTreeData({...treeConfig, hasRowClickExpansion: true});
+      const tree = useTableTreeData({
+        ...treeConfig,
+        hasRowClickExpansion: true,
+      });
       return (
         <Table
           data={visibleData}
@@ -336,7 +339,10 @@ describe('useTableTreeData — row-click expansion', () => {
         data: fileTree,
         idKey: 'id',
       });
-      const tree = useTableTreeData({...treeConfig, hasRowClickExpansion: true});
+      const tree = useTableTreeData({
+        ...treeConfig,
+        hasRowClickExpansion: true,
+      });
       return (
         <Table
           data={visibleData}
@@ -368,7 +374,10 @@ describe('useTableTreeData — row-click expansion', () => {
         data: fileTree,
         idKey: 'id',
       });
-      const tree = useTableTreeData({...treeConfig, hasRowClickExpansion: true});
+      const tree = useTableTreeData({
+        ...treeConfig,
+        hasRowClickExpansion: true,
+      });
       return (
         <Table
           data={visibleData}
@@ -377,7 +386,9 @@ describe('useTableTreeData — row-click expansion', () => {
               key: 'name',
               header: 'Name',
               renderCell: item => (
-                <div contentEditable="false" data-testid={`readonly-${item.id}`}>
+                <div
+                  contentEditable="false"
+                  data-testid={`readonly-${item.id}`}>
                   {item.name}
                 </div>
               ),

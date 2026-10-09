@@ -484,7 +484,9 @@ describe('useTableRowExpansion (detail panel)', () => {
               key: 'name',
               header: 'Name',
               renderCell: item => (
-                <div contentEditable="false" data-testid={`readonly-${item.id}`}>
+                <div
+                  contentEditable="false"
+                  data-testid={`readonly-${item.id}`}>
                   {item.name}
                 </div>
               ),
