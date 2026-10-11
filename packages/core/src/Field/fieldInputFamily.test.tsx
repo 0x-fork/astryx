@@ -21,9 +21,6 @@ const PENDING_FR10 = new Set([
   // text batch
   // date/time batch
   // selector batch
-  'Selector',
-  'MultiSelector',
-  'ComplexSelector',
   // field-root batch
 ]);
 
