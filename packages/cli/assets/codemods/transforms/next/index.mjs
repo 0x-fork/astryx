@@ -16,6 +16,9 @@ import migrateFieldInputStyling, {
 import preserveBottomSheetContentPadding, {
   meta as preserveBottomSheetContentPaddingMeta,
 } from './preserve-bottom-sheet-content-padding.mjs';
+import renameEmptySearchResultsText, {
+  meta as renameEmptySearchResultsTextMeta,
+} from './rename-empty-search-results-text.mjs';
 import validateDataTokenOwnership, {
   meta as validateDataTokenOwnershipMeta,
 } from './validate-data-token-ownership.mjs';
@@ -40,5 +43,10 @@ export default [
     name: 'preserve-bottom-sheet-content-padding',
     transform: preserveBottomSheetContentPadding,
     meta: preserveBottomSheetContentPaddingMeta,
+  },
+  {
+    name: 'rename-empty-search-results-text',
+    transform: renameEmptySearchResultsText,
+    meta: renameEmptySearchResultsTextMeta,
   },
 ];
