@@ -13,6 +13,7 @@ review_triggers: [public-api, behavior, layout, theming, accessibility]
 verified_by:
   [
     packages/core/src/DateInput/DateInput.test.tsx,
+    packages/core/src/DateInput/DateInput.fr10.test.tsx,
     packages/core/src/DateInput/DateInputTouch.test.tsx,
     packages/core/src/DateInput/NativeDateField.test.tsx,
     packages/core/src/DateInput/Presentation.test.tsx,
@@ -48,7 +49,7 @@ compatibility promise, ownership boundary, or visual direction.
 | Builder impact          | Existing native DateInput `changeAction` handlers now run after `onChange` and receive optimistic busy feedback. No API or migration work is required.                                                                        |
 | Compatibility/readiness | Compatible patch correction under the current input-field family rule. Released defaults and controlled ownership are preserved; exact-head browser evidence remains audit evidence rather than product authority.            |
 | Review checks           | Reject a surface-mapping change, lost constraint, callback-order change, unlabeled field, unreachable disabled reason, changed close behavior, or a theming target placed on the wrong owner.                                 |
-| Governing rules         | `spec:AST-043/FR1–FR5`; `family:input-fields/FR1–FR6, FR8–FR9`; `family:overlay-dismissal/FR1–FR7`, including its recorded BottomSheet adoption gap; the three architecture records linked above.                             |
+| Governing rules         | `spec:AST-043/FR1–FR5`; `family:input-fields/FR1–FR6, FR8–FR10`; `family:overlay-dismissal/FR1–FR7`, including its recorded BottomSheet adoption gap; the three architecture records linked above.                            |
 
 This table is a review projection; the body below is authoritative only after this
 record becomes `current`.
@@ -258,14 +259,15 @@ approved policy.
 
 The `date-input` target owns the composite field surface. The
 `date-input-toggle-icon` target reflects collapsed and expanded states on the icon
-itself. The deprecated `date-input-clear-icon` alias remains compatibility metadata;
-the shared `input-clear-icon` target owns current clear-glyph theming.
+itself. The shared `input-clear-icon` target owns clear-glyph theming; DateInput adds no
+clear-glyph target of its own.
 
 ## Family and system relationships
 
 - `family:input-fields` owns stable field sizing, end-control space, grouped
-  adaptation, disabled reasons, loading, Transition Actions, status placement, and
-  the iOS-only focus-zoom floor; DateInput adopts every listed concept.
+  adaptation, disabled reasons, loading, Transition Actions, status placement,
+  base-prop and part-styling targets, and the iOS-only focus-zoom floor; DateInput
+  adopts every listed concept.
 - `family:overlay-dismissal` owns topmost Popover and BottomSheet dismissal. DateInput's
   Popover path uses the shared owner; its bottom-sheet path inherits BottomSheet's
   recorded adoption gap. DateInput owns only selection, open-state requests, and focus
