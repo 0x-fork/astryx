@@ -51,6 +51,7 @@ src/
     ├── listbox.*            listbox, group, and option semantics
     ├── spinbutton.*         numeric role, value, bounds, state, and arrow stepping
     ├── disclosure.*         standalone disclosure state/content semantics
+    ├── grid.*               a composite grid's role, name, row/cell structure, single Tab stop, selection, and arrow/Home/End/Enter keys
     ├── alert-dialog.*       a confirmation surface's alertdialog role, title/message references, modality, initial focus, Escape and click-beside dismissal
     ├── carousel.*           non-rotating collection, slide, off-screen, and focus semantics
     ├── tree-view.*          a tree's roles, names, expanded state, one Tab stop, and arrow/Home/End/Enter-or-Space/typeahead movement
@@ -84,6 +85,7 @@ src/
 | `treeview`       | [APG Tree View](https://www.w3.org/WAI/ARIA/apg/patterns/treeview/) structure and keyboard model                       | TreeList rows: tree/treeitem/group, aria-expanded, level/position, one Tab stop, Up/Down, Right/Left (RTL-mirrored), Home/End, Enter or Space, typeahead                                                                                                                                                 |
 | `carousel`       | [APG Carousel](https://www.w3.org/WAI/ARIA/apg/patterns/carousel/) and WCAG 2.2 semantics                              | Carousel container, slides, scroll area, and stable navigation-control focus                                                                                                                                                                                                                             |
 | `alertdialog`    | [APG Alert Dialog](https://www.w3.org/WAI/ARIA/apg/patterns/alertdialog/) role, references, modality, focus, dismissal | AlertDialog: alertdialog role and name, aria-describedby to the message, modal, Cancel first (advisory), Escape closes, click beside inert (advisory); modal mechanics stay with the modal-dialog contract through Dialog                                                                                |
+| `grid`           | [APG Grid](https://www.w3.org/WAI/ARIA/apg/patterns/grid/) role, structure, name, selection and data-grid keys         | Calendar month grids: grid role/name, row and gridcell/columnheader structure, one Tab stop, aria-selected/aria-multiselectable, arrows in reading order, Home/End, Enter selects (advisory)                                                                                                             |
 | `link`           | WCAG 2.2 semantics; [APG Link](https://www.w3.org/WAI/ARIA/apg/patterns/link/) role and Enter mechanics                | Link, including LinkProvider and `as` router components                                                                                                                                                                                                                                                  |
 
 The toggle-button contract owns the persistent-action extension of button
