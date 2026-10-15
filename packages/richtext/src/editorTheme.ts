@@ -340,6 +340,37 @@ const editorTheme = stylex.create({
     fontWeight: fontWeightVars['--font-weight-semibold'],
     color: colorVars['--color-text-secondary'],
   },
+  // Cells in a table selection — dragging across cells, Shift+arrow between
+  // them, or selecting a row or column — are ringed, for the reason
+  // `hrSelected` gives: a person has to see what the next keystroke will
+  // replace. Lexical names this class on every highlighted cell and takes it
+  // off when the selection goes; left unnamed, a cell inside the selection is
+  // painted exactly like one outside it.
+  //
+  // A ring, not a background wash. A wash sits behind the cell's text and
+  // eats into its contrast, and no one token stays clear of the field in
+  // every theme: `--color-accent-muted` resolves to the field's own colour
+  // under Neutral dark, so the selection would be invisible there, and a
+  // 10% accent tint drops Neutral dark's header text from 5.65:1 to 4.25:1.
+  // The focus ring is drawn for exactly this job — it clears the field by
+  // 5.24:1 at worst across every shipped theme and mode — and sits beside
+  // the text rather than behind it, so no cell's contrast moves at all.
+  // `outline` takes no space, so the document's geometry is untouched
+  // (spec:AST-061 FR9), and the inset offset keeps each ring inside its own
+  // cell instead of bleeding over the neighbour it is not marking.
+  //
+  // `RichTextView` and a read-only editor ring a dragged cell selection too:
+  // Lexical's table pointer handler does not ask whether the surface is
+  // editable, and a person selects cells in a read surface to copy them, so
+  // seeing the selection is as right there. Both surfaces draw the same ring
+  // and neither moves a block, so they still render the same document the
+  // same way.
+  tableCellSelected: {
+    outlineWidth: focusVars['--focus-outline-width'],
+    outlineStyle: focusVars['--focus-outline-style'],
+    outlineColor: focusVars['--focus-outline-color'],
+    outlineOffset: `calc(-1 * ${focusVars['--focus-outline-width']})`,
+  },
   // Thematic breaks, drawn like core Markdown's rule. A rule is a decorator,
   // and Lexical puts a zero-size caret boundary element beside a decorator at
   // either edge of the document, so a rule there is not literally the first
@@ -481,6 +512,9 @@ export function sharedEditorTheme(): EditorThemeClasses {
     tableRow: block(editorTheme.tableRow),
     tableCell: block(editorTheme.tableCell),
     tableCellHeader: block(editorTheme.tableCellHeader),
+    // Added on top of the cell's own class by Lexical while the cell is in a
+    // table selection, so it carries no direction of its own.
+    tableCellSelected: className(editorTheme.tableCellSelected),
     tableScrollableWrapper: block(editorTheme.tableScrollableWrapper),
   };
 }
