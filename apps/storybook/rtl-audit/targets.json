@@ -221,6 +221,15 @@
     }
   },
   {
+    "component": "DropdownMenuCheckboxItem",
+    "storyId": "core-dropdownmenu--lab-checkbox-items",
+    "dims": ["D2"],
+    "selectors": {
+      "prev": ".astryx-dropdown-menu-item .astryx-icon",
+      "next": "[data-testid=\"dropdown-menu-checkbox-item-end-content\"]"
+    }
+  },
+  {
     "component": "DropdownMenu",
     "storyId": "core-dropdownmenu--alignment-end",
     "dims": ["D4"],
