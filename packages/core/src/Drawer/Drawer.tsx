@@ -4,9 +4,9 @@
 
 /**
  * @file Drawer.tsx
- * @input Uses React, StyleX, theme tokens and text defaults, the Dialog purpose type, shared focus/dismissal/depth primitives, container padding lowering, scroll locking/dialog presence, BaseProps, merged refs/props, themeProps
+ * @input Uses React, StyleX, theme tokens, the shared layer text/structure resets and content boundary, the Dialog purpose type, shared focus/dismissal/depth primitives, container padding lowering, scroll locking/dialog presence, BaseProps, merged refs/props, themeProps
  * @output Exports Drawer component and DrawerProps
- * @position Lab implementation; consumed by index.ts, tested by Drawer.test.tsx, demonstrated in Storybook
+ * @position Core implementation; consumed by index.ts, tested by Drawer.test.tsx, demonstrated in Storybook
  *
  * Overlay panel for inspectors and detail views — the "click a table row,
  * see its details" pattern. Slides in from the inline start or end edge and
@@ -18,7 +18,8 @@
  *
  * Sizing is viewport-aware: `width` is the desktop budget, and below
  * the mobile breakpoint it preserves a 56px reveal of the page behind, capped
- * by the requested width (or fills the viewport with `isFullWidthOnMobile`).
+ * by the requested width (or fills the viewport with the experimental
+ * `experimental.isFullWidthOnMobile` option).
  *
  * Uses the native `<dialog>` element (same precedent as Dialog/MobileNav):
  * - `showModal()` when `hasScrim` (default) — top-layer rendering, focus
@@ -49,46 +50,40 @@
  * root dialog stays the overlay boundary (`overlayPaddingReset`).
  *
  * SYNC: When modified, update these files to stay in sync:
- * - /packages/lab/src/Drawer/Drawer.doc.mjs (props table, features, usage)
- * - /packages/lab/src/Drawer/Drawer.test.tsx (tests for new/changed behavior)
- * - /packages/lab/src/Drawer/Drawer.spec.md (component contract)
- * - /packages/lab/src/Drawer/index.ts (exports if types change)
+ * - /packages/core/src/Drawer/Drawer.doc.mjs (props table, features, usage)
+ * - /packages/core/src/Drawer/Drawer.test.tsx (tests for new/changed behavior)
+ * - /packages/core/src/Drawer/Drawer.spec.md (component contract)
+ * - /packages/core/src/Drawer/index.ts (exports if types change)
+ * - /packages/cli/assets/templates/blocks/components/Drawer/ (showcase blocks)
  * - /apps/storybook/stories/Drawer.stories.tsx (examples and visual coverage)
  */
 
 import {useCallback, useRef, useState, type ReactNode} from 'react';
 import * as stylex from '@stylexjs/stylex';
-import type {BaseProps} from '@astryxdesign/core';
+import type {BaseProps} from '../BaseProps';
 import {
   borderVars,
   colorVars,
   durationVars,
   easeVars,
   shadowVars,
-  typeScaleVars,
-  typographyVars,
-} from '@astryxdesign/core/theme/tokens.stylex';
-import type {DialogPurpose} from '@astryxdesign/core/Dialog';
-import {
-  useFocusTrap,
-  useMergedRefs,
-  useScrollLock,
-} from '@astryxdesign/core/hooks';
-import {LayerDepthProvider, useLayerDismissal} from '@astryxdesign/core/Layer';
-import {
-  composeEventHandlers,
-  mergeProps,
-  themeProps,
-} from '@astryxdesign/core/utils';
-import {container, overlayPaddingReset} from '@astryxdesign/core/Layout';
+} from '../theme/tokens.stylex';
+import type {DialogPurpose} from '../Dialog';
+import {useFocusTrap, useMergedRefs, useScrollLock} from '../hooks';
+import {LayerDepthProvider, useLayerDismissal} from '../Layer';
+import {layerTextReset} from '../Layer/layerTextReset.stylex';
+import {layerStructureReset} from '../Layer/layerStructureReset.stylex';
+import {LayerContentBoundary} from '../Layer/layerScopedContext';
+import {composeEventHandlers, mergeProps, themeProps} from '../utils';
+import {container, overlayPaddingReset} from '../Layout';
 import {
   containerPaddingBlockEndVarStyles,
   containerPaddingBlockStartVarStyles,
   containerPaddingInlineVarStyles,
   paddingStyles,
   spacingStepToToken,
-} from '@astryxdesign/core/Layout/padding.stylex';
-import type {SpacingStep, SpacingToken} from '@astryxdesign/core/Layout';
+} from '../Layout/padding.stylex';
+import type {SpacingStep, SpacingToken} from '../Layout';
 import {useDrawerDialogPresence} from './useDrawerDialogPresence';
 
 // =============================================================================
@@ -108,28 +103,14 @@ const MOBILE_WIDTH_FULL = '100dvw';
 
 const styles = stylex.create({
   dialog: {
-    // Keep the layer text boundary local rather than exposing Core styling internals.
-    fontFamily: typographyVars['--font-family-body'],
-    fontSize: typeScaleVars['--text-body-size'],
-    fontWeight: typeScaleVars['--text-body-weight'],
-    lineHeight: typeScaleVars['--text-body-leading'],
-    fontStyle: 'normal',
-    textAlign: 'start',
-    textAlignLast: 'auto',
-    textIndent: 0,
-    textTransform: 'none',
-    letterSpacing: 'normal',
-    wordSpacing: 'normal',
-    textShadow: 'none',
-    whiteSpace: 'normal',
-    wordBreak: 'normal',
-    overflowWrap: 'normal',
-    hyphens: 'manual',
     // Reset native <dialog> defaults — the dialog element IS the panel.
+    // The layer text baseline comes from the shared `layerTextReset`, applied
+    // with the structural reset ahead of these styles on the root below.
     position: 'fixed',
     margin: 0,
     padding: 0,
-    border: 'none',
+    borderWidth: 0,
+    borderStyle: 'none',
     // Square corners: the drawer is flush with the viewport edge on three
     // sides, so a radius would only ever cut the two edge-adjacent corners.
     borderRadius: 0,
@@ -323,19 +304,27 @@ export interface DrawerProps extends BaseProps<HTMLDialogElement> {
    * Desktop width budget. A number is pixels; a string is any CSS length
    * (`'50%'`, `'32rem'`). Below the mobile breakpoint (640px), this
    * remains the maximum while the drawer preserves a 56px reveal of the page
-   * behind — see `isFullWidthOnMobile`.
+   * behind — see `experimental.isFullWidthOnMobile`.
    * @default 400
    */
   width?: number | string;
 
   /**
-   * Whether the drawer covers the full viewport width on mobile
-   * (below 640px) instead of preserving the default 56px reveal of the page
-   * behind. The reveal makes the drawer read as an overlay rather than a
-   * navigation.
-   * @default false
+   * Experimental options, outside the stable compatibility promise: anything
+   * in this object may change or be removed in a patch release. Omit it for
+   * the stable behavior.
+   * @experimental
    */
-  isFullWidthOnMobile?: boolean;
+  experimental?: {
+    /**
+     * Cover the full viewport width on mobile (below 640px) instead of
+     * preserving the default 56px reveal of the page behind. The reveal makes
+     * the drawer read as an overlay rather than a navigation.
+     * @experimental
+     * @default false
+     */
+    isFullWidthOnMobile?: boolean;
+  };
 
   /**
    * Accessible label for the drawer (required — the drawer has no
@@ -400,7 +389,7 @@ export interface DrawerProps extends BaseProps<HTMLDialogElement> {
  * non-modal overlay with `hasScrim={false}` that leaves the page behind
  * interactive. `width` is the desktop budget; below 640px the panel preserves
  * a 56px page reveal without exceeding that budget (or fills the viewport
- * with `isFullWidthOnMobile`). Escape
+ * with the experimental `experimental.isFullWidthOnMobile`). Escape
  * closes the top-most open drawer; focus returns to the element that
  * opened it.
  *
@@ -433,7 +422,7 @@ export function Drawer({
   onOpenChange,
   side = 'end',
   width = 400,
-  isFullWidthOnMobile = false,
+  experimental,
   label,
   hasScrim = true,
   purpose = 'info',
@@ -525,6 +514,7 @@ export function Drawer({
   );
 
   const widthValue = typeof width === 'number' ? `${width}px` : width;
+  const isFullWidthOnMobile = experimental?.isFullWidthOnMobile ?? false;
   const mobileWidth = isFullWidthOnMobile
     ? MOBILE_WIDTH_FULL
     : `min(${widthValue}, calc(100dvw - ${MOBILE_PAGE_REVEAL}px))`;
@@ -554,6 +544,8 @@ export function Drawer({
       {...mergeProps(
         themeProps('drawer', {side: anchoredSide}),
         stylex.props(
+          layerTextReset.reset,
+          layerStructureReset.reset,
           styles.dialog,
           overlayPaddingReset.reset,
           sideStyle,
@@ -578,38 +570,40 @@ export function Drawer({
       onKeyDown={onKeyDownProp}
       onCancel={handleCancel}>
       <LayerDepthProvider>
-        {/* Scrollable content area — tabIndex so the dialog's focusing steps
-            land on the panel body rather than the first button inside. */}
-        <div
-          tabIndex={-1}
-          {...stylex.props(
-            styles.content,
-            ...container(
-              usesThemePadding
-                ? {useThemeDefault: 'drawer'}
-                : {
-                    paddingInnerX: paddingToken,
-                    paddingInnerY: paddingToken,
-                    paddingOuterX: paddingToken,
-                    paddingOuterY: paddingToken,
-                  },
-            ),
-            !usesThemePadding &&
-              effectivePadding !== 4 &&
-              paddingStyles[effectivePadding],
-            !usesThemePadding &&
-              effectivePadding !== 4 &&
-              containerPaddingInlineVarStyles[effectivePadding],
-            !usesThemePadding &&
-              effectivePadding !== 4 &&
-              containerPaddingBlockStartVarStyles[effectivePadding],
-            !usesThemePadding &&
-              effectivePadding !== 4 &&
-              containerPaddingBlockEndVarStyles[effectivePadding],
-            styles.contentSafeArea,
-          )}>
-          {children}
-        </div>
+        <LayerContentBoundary>
+          {/* Scrollable content area — tabIndex so the dialog's focusing steps
+              land on the panel body rather than the first button inside. */}
+          <div
+            tabIndex={-1}
+            {...stylex.props(
+              styles.content,
+              ...container(
+                usesThemePadding
+                  ? {useThemeDefault: 'drawer'}
+                  : {
+                      paddingInnerX: paddingToken,
+                      paddingInnerY: paddingToken,
+                      paddingOuterX: paddingToken,
+                      paddingOuterY: paddingToken,
+                    },
+              ),
+              !usesThemePadding &&
+                effectivePadding !== 4 &&
+                paddingStyles[effectivePadding],
+              !usesThemePadding &&
+                effectivePadding !== 4 &&
+                containerPaddingInlineVarStyles[effectivePadding],
+              !usesThemePadding &&
+                effectivePadding !== 4 &&
+                containerPaddingBlockStartVarStyles[effectivePadding],
+              !usesThemePadding &&
+                effectivePadding !== 4 &&
+                containerPaddingBlockEndVarStyles[effectivePadding],
+              styles.contentSafeArea,
+            )}>
+            {children}
+          </div>
+        </LayerContentBoundary>
       </LayerDepthProvider>
     </dialog>
   );

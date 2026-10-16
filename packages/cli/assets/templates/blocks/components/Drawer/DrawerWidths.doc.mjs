@@ -1,21 +1,21 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
 /** @type {import('@astryxdesign/cli/authoring').TemplateDoc} */
-export default {
+export const doc = {
   type: 'block',
-  name: 'Basic',
-  displayName: 'Basic',
+  name: 'Width budget: pixels or any CSS length',
+  displayName: 'Width budget: pixels or any CSS length',
   description:
-    'Open a modal drawer from a single trigger. The scrim dims the page; Escape, a scrim click, or the header close button closes it, and focus returns to the trigger.',
+    'Compare a numeric pixel width with rem and percentage lengths. The width budget also caps the drawer on mobile.',
   exampleFor: 'Drawer',
   isReady: true,
-  isShowcase: true,
   aspectRatio: 16 / 9,
   componentsUsed: [
     'Drawer',
     'Button',
     'Layout',
     'LayoutContent',
+    'HStack',
     'DrawerHeader',
     'Text',
   ],

@@ -1,12 +1,12 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 
 /** @type {import('@astryxdesign/cli/authoring').TemplateDoc} */
-export default {
+export const doc = {
   type: 'block',
-  name: 'Wide desktop panel, full-width on mobile',
-  displayName: 'Wide desktop panel, full-width on mobile',
+  name: 'Slide in from the start edge',
+  displayName: 'Slide in from the start edge',
   description:
-    'Use a 560px desktop width and isFullWidthOnMobile to fill the viewport below 640px, without the default page reveal.',
+    'Set side="start" to open from the inline start edge: left in LTR and right in RTL. The default end edge follows the inspector convention.',
   exampleFor: 'Drawer',
   isReady: true,
   aspectRatio: 16 / 9,

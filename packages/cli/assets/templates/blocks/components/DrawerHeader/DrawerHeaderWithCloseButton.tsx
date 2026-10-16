@@ -4,17 +4,17 @@
 
 /**
  * @input Controlled open state for a modal Drawer
- * @output A single-trigger drawer with a scrim and the built-in close button
- * @position Lab Drawer's docsite showcase and copyable CLI block
+ * @output A Drawer whose DrawerHeader renders a close button because it receives onOpenChange
+ * @position Copyable DrawerHeader example
  */
 
 import {useState} from 'react';
-import {Drawer, DrawerHeader} from '@astryxdesign/lab';
+import {Drawer, DrawerHeader} from '@astryxdesign/core/Drawer';
 import {Button} from '@astryxdesign/core/Button';
 import {Layout, LayoutContent} from '@astryxdesign/core/Layout';
 import {Text} from '@astryxdesign/core/Text';
 
-export default function DrawerShowcase() {
+export default function DrawerHeaderWithCloseButton() {
   const [isOpen, setIsOpen] = useState(false);
 
   return (
@@ -30,7 +30,8 @@ export default function DrawerShowcase() {
           content={
             <LayoutContent>
               <Text type="body">
-                Close with Escape, the scrim, or the close button.
+                Passing onOpenChange renders the close button, which calls it
+                with false.
               </Text>
             </LayoutContent>
           }
