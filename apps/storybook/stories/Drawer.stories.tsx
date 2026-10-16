@@ -221,6 +221,85 @@ export const Sides: Story = {
   },
 };
 
+function selfDirectedRtlStory(side: 'start' | 'end'): Story {
+  return {
+    name: `Self-applied RTL ${side} audit`,
+    parameters: {docs: {disable: true}},
+    render: () => {
+      const [isOpen, setIsOpen] = useState(false);
+      return (
+        <>
+          <Button
+            label={`Open self-directed RTL ${side} drawer`}
+            onClick={() => setIsOpen(true)}
+          />
+          <Drawer
+            isOpen={isOpen}
+            onOpenChange={setIsOpen}
+            label="Deployment details"
+            side={side}
+            dir="rtl">
+            <Layout
+              header={
+                <DrawerHeader
+                  title="Deployment details"
+                  onOpenChange={setIsOpen}
+                />
+              }
+              content={
+                <LayoutContent>
+                  <Text type="body">The Drawer root owns this RTL region.</Text>
+                </LayoutContent>
+              }
+            />
+          </Drawer>
+        </>
+      );
+    },
+  };
+}
+
+export const SelfDirectedRtlStart = selfDirectedRtlStory('start');
+export const SelfDirectedRtlEnd = selfDirectedRtlStory('end');
+
+export const NestedLtrOverride: Story = {
+  name: 'Nested LTR override audit',
+  parameters: {docs: {disable: true}},
+  render: () => {
+    const [isOpen, setIsOpen] = useState(false);
+    return (
+      <>
+        <Button
+          label="Open nested LTR drawer"
+          onClick={() => setIsOpen(true)}
+        />
+        <Drawer
+          isOpen={isOpen}
+          onOpenChange={setIsOpen}
+          label="Deployment details"
+          side="end"
+          dir="ltr">
+          <Layout
+            header={
+              <DrawerHeader
+                title="Deployment details"
+                onOpenChange={setIsOpen}
+              />
+            }
+            content={
+              <LayoutContent>
+                <Text type="body">
+                  This local LTR region overrides the ambient RTL page.
+                </Text>
+              </LayoutContent>
+            }
+          />
+        </Drawer>
+      </>
+    );
+  },
+};
+
 /**
  * `width` is the desktop budget: a number of pixels or any CSS length.
  * Narrow the browser below 640px: each width remains an upper bound while
