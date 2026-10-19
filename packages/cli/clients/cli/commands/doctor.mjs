@@ -174,6 +174,79 @@ function printTemplateConflicts(data) {
 }
 
 /**
+ * The documented-props comparison, with every field its JSON carries: a
+ * visible line when it was skipped, the findings (all warnings), the
+ * components it could not read, and how many were compared with which
+ * TypeScript, as an [ok] when nothing differs (never after a failed check).
+ * @param {import('../../../api/integration/authoring-checks.type.mjs').PropDriftReport | undefined} report
+ * @param {boolean} failed
+ */
+function propDriftBlocks(report, failed) {
+  if (!report) return [];
+  if (report.status === 'skipped') {
+    return [text(`[skip] Props not compared: ${report.reason}`)];
+  }
+  const blocks = [];
+  if (report.findings.length > 0) {
+    // Two docs of one name are two components.
+    const components = new Set(
+      report.findings.map(f => `${f.doc}\0${f.component}`),
+    ).size;
+    blocks.push(
+      records(report.findings, {
+        fields: [
+          'severity',
+          'component',
+          'prop',
+          'kind',
+          'message',
+          'doc',
+          'source',
+          'docType',
+          'codeType',
+          'docRequired',
+          'codeRequired',
+        ],
+        format: {severity: statusToken},
+      }),
+      text(
+        `${report.findings.length} prop(s) differ between the docs and the code in ${components} of ${report.components} component(s) compared (TypeScript ${report.typescript}). ` +
+          'These are warnings: update the doc, or the code if the doc is right.',
+      ),
+    );
+  }
+  if (report.unchecked.length > 0) {
+    blocks.push(
+      text(
+        `[info] Props not compared for ${report.unchecked.length} documented component(s):`,
+      ),
+      records(report.unchecked, {fields: ['component', 'doc', 'reason']}),
+    );
+  }
+  const notChecked = report.propsNotChecked ?? [];
+  if (notChecked.length > 0) {
+    blocks.push(
+      text(
+        `[info] Props not checked for a doc entry in ${notChecked.length} component(s):`,
+      ),
+      records(notChecked, {fields: ['component', 'doc', 'reason', 'props']}),
+    );
+  }
+  if (report.findings.length === 0) {
+    const apart =
+      notChecked.length > 0 ? ', apart from the props not checked' : '';
+    blocks.push(
+      text(
+        !failed && report.components > 0
+          ? `[ok] Documented prop names and required flags match the code in ${report.components} component(s)${apart} (TypeScript ${report.typescript}).`
+          : `[info] Props compared in ${report.components} component(s) (TypeScript ${report.typescript}).`,
+      ),
+    );
+  }
+  return blocks;
+}
+
+/**
  * @param {import('../../../api/integration/authoring-checks.type.mjs').IntegrationComponentConflictResponse['data']} data
  */
 function printComponentConflicts(data) {
@@ -205,6 +278,7 @@ function printComponentConflicts(data) {
       ),
     );
   }
+  output.push(...propDriftBlocks(data.propDrift, failed));
   emit(...output);
 }
 

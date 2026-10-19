@@ -2,7 +2,8 @@
 
 /**
  * @file Documented props against a component's TypeScript props: each kind
- * of finding, and each component it cannot read.
+ * of finding, each component it cannot read, and the visible skip when the
+ * project has no TypeScript.
  */
 
 import * as fs from 'node:fs';
@@ -10,7 +11,12 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import {createRequire} from 'node:module';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
-import {comparePropTables} from './prop-drift.mjs';
+import {
+  comparePropDocs,
+  comparePropTables,
+  TYPESCRIPT_MISSING_REASON,
+} from './prop-drift.mjs';
+import {unusableTypeScriptReason} from './project-typescript.mjs';
 
 const require = createRequire(import.meta.url);
 const TYPESCRIPT_DIR = path.dirname(require.resolve('typescript/package.json'));
@@ -147,6 +153,8 @@ export function Badge(props: BadgeProps) { return null; }`,
     expect(
       report.findings.find(f => f.kind === 'required_mismatch'),
     ).toMatchObject({
+      docRequired: false,
+      codeRequired: true,
       doc: 'components/Badge.doc.mjs',
       source: 'components/Badge.tsx',
     });
@@ -255,6 +263,125 @@ export function Select(props: Single | Multi) { return null; }`,
         expect.stringMatching(`^Without${i}'s props are typed`),
       ),
     );
+  });
+
+  it('shows a method prop the doc leaves out with its function type, optional or not', async () => {
+    withTypeScript();
+    const picker = component(
+      'Picker',
+      `export interface PickerProps {
+  label?: string;
+  onPick(value: string, index: number): void;
+  onClear?(reason: string): void;
+  get size(): number;
+}
+export function Picker(props: PickerProps) { return null; }`,
+      {props: [prop('label', 'string')]},
+    );
+
+    const report = await compare([picker]);
+
+    expect(
+      report.findings.map(f => `${f.prop} ${f.kind}: ${f.codeType}`),
+    ).toEqual([
+      'onClear not_in_doc: (reason: string) => void',
+      'onPick not_in_doc: (value: string, index: number) => void',
+      'size not_in_doc: number',
+    ]);
+  });
+
+  it("prints a union's members in the order the source declares them", async () => {
+    withTypeScript();
+    // The same literals, made first in another order, would set the
+    // compiler's own order.
+    const ordered = component(
+      'Ordered',
+      [
+        "type Other = 'md' | 'sm' | 'lg';",
+        'export type Unrelated = Other;',
+        "type Small = 'lg' | 'sm';",
+        "export function Ordered(props: {size?: Small} | {size?: 'md'; label?: string}) { return null; }",
+      ].join('\n'),
+      {props: [prop('label', 'string')]},
+    );
+
+    const report = await compare([ordered]);
+
+    expect(
+      report.findings.find(finding => finding.prop === 'size')?.codeType,
+    ).toBe("'lg' | 'sm' | 'md'");
+  });
+
+  it("reads a prop that the package's defaultProps fills as optional", async () => {
+    withTypeScript();
+    // A library type that declares an optional `defaultProps`, as React's
+    // component types do, fills nothing; without strict null checks it reads
+    // as filling every prop.
+    const lib = path.join(pkg, 'node_modules', '@acme', 'lib');
+    fs.mkdirSync(lib, {recursive: true});
+    fs.writeFileSync(
+      path.join(lib, 'package.json'),
+      JSON.stringify({name: '@acme/lib', types: 'index.d.ts'}),
+    );
+    fs.writeFileSync(
+      path.join(lib, 'index.d.ts'),
+      `export interface Kind<P> { new (props: P): {}; defaultProps?: Partial<P> }
+export declare function memo<T extends (p: any) => any>(c: T): {(p: Parameters<T>[0]): null; $$typeof: symbol; type: T};
+export declare function lazy<T extends (p: any) => any>(f: () => Promise<{default: T}>): {(p: Parameters<T>[0]): null; $$typeof: symbol; _result: T};\n`,
+    );
+    fs.writeFileSync(
+      path.join(pkg, 'tsconfig.json'),
+      JSON.stringify({compilerOptions: {strict: false, jsx: 'react-jsx'}}),
+    );
+    const source = `import {type Kind, lazy, memo} from '@acme/lib';
+declare class Component<P> { constructor(props: P); props: P }
+export class Klass extends Component<{label: string; size: number}> {
+  static defaultProps = {size: 1};
+}
+export function Fn(props: {label: string; size: number}) { return null; }
+Fn.defaultProps = {size: 1};
+export function Gn(props: {label: string; size: number}) { return null; }
+Gn.defaultProps = {size: 1};
+export declare const Typed: Kind<{label: string; size: number}>;
+export const Memoed = memo(Fn);
+export const Lazied = lazy(() => Promise.resolve({default: Fn}));
+export const Thrice = memo(memo(memo(Fn)));
+export class Loose extends Component<{label: string; size: number}> { static defaultProps: any = {}; }`;
+    const props = [
+      prop('label', 'string'),
+      prop('size', 'number', {required: true}),
+    ];
+
+    const report = await compare([
+      ...'Klass Fn Typed Memoed Lazied Thrice Loose'
+        .split(' ')
+        .map(name => component(name, source, {props})),
+      component('Gn', source, {
+        props: [prop('label', 'string'), prop('size', 'number')],
+      }),
+    ]);
+
+    // JSX callers may leave out a prop defaultProps fills (for `memo` and
+    // `lazy`, the wrapped component's, two layers deep as React's types read
+    // it; `any` fills every prop), so a doc that marks it required disagrees
+    // with the code, and one that doesn't agrees.
+    expect(kinds(report)).toEqual([
+      'Fn.label required_mismatch',
+      'Fn.size required_mismatch',
+      'Gn.label required_mismatch',
+      'Klass.label required_mismatch',
+      'Klass.size required_mismatch',
+      'Lazied.label required_mismatch',
+      'Lazied.size required_mismatch',
+      'Loose.size required_mismatch',
+      'Memoed.label required_mismatch',
+      'Memoed.size required_mismatch',
+      'Thrice.label required_mismatch',
+      'Typed.label required_mismatch',
+    ]);
+    expect(
+      report.findings.find(f => f.component === 'Fn' && f.prop === 'size'),
+    ).toMatchObject({docRequired: true, codeRequired: false});
   });
 
   it('lists each component whose props it cannot read as not compared', async () => {
@@ -550,5 +677,521 @@ export const Wrapped = forwardRef<HTMLButtonElement, {label?: string}>((props, r
               : 'could not resolve',
       );
     }
+  });
+});
+
+/**
+ * A multi-component doc's entry.
+ * @param {string} name
+ * @param {any[]} props
+ */
+const entry = (name, props) => ({
+  name,
+  displayName: name,
+  description: 'Fixture.',
+  props,
+});
+
+/** @param {import('./prop-drift.mjs').PropDriftComponent[]} components */
+function compareDocs(components) {
+  return comparePropDocs(components, {packageDir: pkg, resolveFrom: [pkg]});
+}
+
+describe('comparePropDocs', () => {
+  it('compares each entry of a multi-component doc against its own export, and skips hooks', async () => {
+    withTypeScript();
+    const tabs = component(
+      'Tabs',
+      `export function Tabs(props: {value: string}) { return null; }
+export function Tab(props: {value: string; isDisabled?: boolean}) { return null; }
+export function useTabs(options: {value: string}) { return options; }`,
+      {
+        components: [
+          entry('Tabs', [prop('value', 'string', {required: true})]),
+          entry('Tab', [
+            prop('value', 'string', {required: true}),
+            prop('isSelected', 'boolean'),
+          ]),
+          {
+            name: 'useTabs',
+            displayName: 'useTabs',
+            description: 'Fixture.',
+            params: [
+              {
+                name: 'options',
+                type: '{value: string}',
+                description: 'Fixture.',
+              },
+            ],
+          },
+        ],
+      },
+    );
+
+    const report = await compareDocs([tabs]);
+
+    expect(report.components).toBe(2);
+    expect(kinds(report)).toEqual([
+      'Tab.isDisabled not_in_doc',
+      'Tab.isSelected not_in_code',
+    ]);
+  });
+
+  it('compares a member record only against its own source, and the family record leaves that member alone', async () => {
+    withTypeScript();
+    const status = component(
+      'Status',
+      'export function Status(props: {value: string}) { return null; }\n',
+      {
+        components: [
+          entry('Status', [prop('value', 'string', {required: true})]),
+          entry('StatusGlyph', [
+            prop('size', 'number'),
+            prop('tone', 'string'),
+          ]),
+        ],
+      },
+    );
+    const glyphSource = path.join(pkg, 'components', 'StatusView.tsx');
+    fs.writeFileSync(
+      glyphSource,
+      'export function StatusGlyph(props: {size?: number}) { return null; }\n',
+    );
+
+    const report = await compareDocs([
+      status,
+      {...status, name: 'StatusGlyph', sourcePath: glyphSource},
+    ]);
+
+    expect(report.unchecked).toEqual([]);
+    expect(report.components).toBe(2);
+    expect(kinds(report)).toEqual(['StatusGlyph.tone not_in_code']);
+    expect(report.findings[0].source).toBe('components/StatusView.tsx');
+  });
+
+  it('lists a member record that no file in the package declares as not compared', async () => {
+    withTypeScript();
+    const status = component(
+      'Status',
+      'export function Status(props: {value: string}) { return null; }\n',
+      {
+        components: [
+          entry('Status', [prop('value', 'string', {required: true})]),
+          entry('StatusGlyph', [prop('size', 'number')]),
+        ],
+      },
+    );
+
+    // Only another folder, or built output, declares the member.
+    const report = await compareDocs([
+      status,
+      {...status, name: 'StatusGlyph', sourcePath: null},
+    ]);
+
+    expect(report.components).toBe(1);
+    expect(report.findings).toEqual([]);
+    expect(report.unchecked).toEqual([
+      {
+        component: 'StatusGlyph',
+        doc: 'components/Status.doc.mjs',
+        reason: 'no source file for StatusGlyph',
+      },
+    ]);
+  });
+
+  it('compares every entry of a family doc named after another export, and lists one with no source as not compared', async () => {
+    withTypeScript();
+    const menu = component(
+      'Menu',
+      [
+        'export function MenuRoot(props: {open?: boolean}) { return null; }',
+        'export function MenuItem(props: {value: string}) { return null; }',
+      ].join('\n'),
+      {
+        name: 'MenuRoot',
+        hiddenComponents: ['MenuItem', 'MenuPart'],
+        components: [
+          entry('MenuItem', [prop('label', 'string')]),
+          entry('MenuGhost', [prop('tone', 'string')]),
+          entry('MenuPart', [prop('tone', 'string')]),
+        ],
+      },
+    );
+    // A hidden entry declared in another file of the doc's folder.
+    fs.writeFileSync(
+      path.join(pkg, 'components', 'menu-parts.tsx'),
+      'export function MenuPart(props: {depth?: number}) { return null; }\n',
+    );
+
+    // Discovery records the doc under `MenuRoot` and leaves the hidden
+    // `MenuItem` and `MenuPart` and the unbuilt `MenuGhost` without records
+    // of their own.
+    const report = await compareDocs([{...menu, name: 'MenuRoot'}]);
+
+    expect(kinds(report)).toEqual([
+      'MenuItem.label not_in_code',
+      'MenuItem.value not_in_doc',
+      'MenuPart.depth not_in_doc',
+      'MenuPart.tone not_in_code',
+    ]);
+    expect(report.unchecked).toEqual([
+      {
+        component: 'MenuGhost',
+        doc: 'components/Menu.doc.mjs',
+        reason: 'Menu.tsx has no export named MenuGhost',
+      },
+    ]);
+  });
+
+  it("compares a doc's own props with the export its name names, which another file can hold", async () => {
+    withTypeScript();
+    const status = component(
+      'Status',
+      'export function Status(props: {value: string}) { return null; }\n',
+      {name: 'StatusView', props: [prop('size', 'number')]},
+    );
+    const viewSource = path.join(pkg, 'components', 'StatusView.tsx');
+    fs.writeFileSync(
+      viewSource,
+      'export function StatusView(props: {size?: number}) { return null; }\n',
+    );
+
+    // Discovery names the record after the file, or after the export.
+    const byFile = await compareDocs([status]);
+    const byExport = await compareDocs([
+      {...status, name: 'StatusView', sourcePath: viewSource},
+    ]);
+
+    for (const report of [byFile, byExport]) {
+      expect(report.unchecked).toEqual([]);
+      expect(report.components).toBe(1);
+      expect(report.findings).toEqual([]);
+    }
+  });
+
+  it('compares a table for one component in each doc that has one', async () => {
+    withTypeScript();
+    const title = prop('title', 'string', {required: true});
+    const list = component(
+      'List',
+      'export function List(props: {label: string}) { return null; }\n',
+      {
+        components: [
+          entry('List', [prop('label', 'string', {required: true})]),
+          entry('ListGroup', [title]),
+        ],
+      },
+    );
+    const group = component(
+      'ListGroup',
+      'export function ListGroup(props: {title: string}) { return null; }\n',
+      {props: [title, prop('stale', 'string')]},
+    );
+
+    const report = await compareDocs([list, group]);
+
+    expect(report.components).toBe(3);
+    expect(kinds(report)).toEqual(['ListGroup.stale not_in_code']);
+    expect(report.findings[0].doc).toBe('components/ListGroup.doc.mjs');
+  });
+
+  it('lists every component as not compared when a declaration file the config includes, or a type package it names, does not resolve', async () => {
+    withTypeScript();
+    const tsconfig = path.join(pkg, 'tsconfig.json');
+    const config = JSON.parse(fs.readFileSync(tsconfig, 'utf8'));
+    /** @param {object} options */
+    const configure = options =>
+      fs.writeFileSync(
+        tsconfig,
+        JSON.stringify({
+          ...config,
+          compilerOptions: {...config.compilerOptions, ...options},
+          include: ['components', 'types'],
+        }),
+      );
+    fs.mkdirSync(path.join(pkg, 'types'));
+    const globals = path.join(pkg, 'types', 'globals.d.ts');
+    const tables = () => [
+      component(
+        'Omitted',
+        'export function Omitted(props: Omit<{label: string; size?: number}, keyof MissingProps>) { return null; }\n',
+        {
+          props: [
+            prop('label', 'string', {required: true}),
+            prop('size', 'number'),
+          ],
+        },
+      ),
+      component(
+        'Plain',
+        'export function Plain(props: {label?: string}) { return null; }\n',
+        {props: [prop('label', 'string')]},
+      ),
+    ];
+    /** @param {RegExp} reason */
+    const unread = reason =>
+      ['Omitted', 'Plain'].map(name => ({
+        component: name,
+        doc: `components/${name}.doc.mjs`,
+        reason: expect.stringMatching(reason),
+      }));
+
+    // A global type made from a package that isn't installed.
+    configure({});
+    fs.writeFileSync(
+      globals,
+      "import type {Props} from '@acme/not-installed';\ndeclare global { type MissingProps = Props; }\n",
+    );
+    let report = await compare(tables());
+    expect(report.findings).toEqual([]);
+    expect(report.unchecked).toEqual(
+      unread(
+        /depends on `@acme\/not-installed` \(imported in \.\.\/types\/globals\.d\.ts\)/,
+      ),
+    );
+
+    // A global type made from a name declared nowhere.
+    fs.writeFileSync(
+      globals,
+      'declare global { type MissingProps = NowhereProps; }\nexport {};\n',
+    );
+    report = await compare(tables());
+    expect(report.findings).toEqual([]);
+    expect(report.unchecked).toEqual(
+      unread(
+        /depends on `NowhereProps` \(used in \.\.\/types\/globals\.d\.ts\)/,
+      ),
+    );
+
+    // A type package the config names that isn't installed.
+    fs.writeFileSync(
+      globals,
+      'declare global { type MissingProps = {id?: string}; }\nexport {};\n',
+    );
+    configure({types: ['@acme/not-installed-globals']});
+    report = await compare(tables());
+    expect(report.findings).toEqual([]);
+    expect(report.unchecked).toEqual(
+      unread(
+        /depends on the types `@acme\/not-installed-globals` \(named in \.\.\/tsconfig\.json\)/,
+      ),
+    );
+
+    // Both resolved: compared.
+    configure({types: []});
+    report = await compare(tables());
+    expect(report.unchecked).toEqual([]);
+    expect(report.components).toBe(2);
+  });
+
+  it("lists every table, with the error, when the package's TypeScript config has an error", async () => {
+    withTypeScript();
+    fs.writeFileSync(
+      path.join(pkg, 'tsconfig.json'),
+      JSON.stringify({extends: './missing-base.json'}),
+    );
+    const titled = component(
+      'Titled',
+      'export function Titled(props: {title?: string}) { return null; }\n',
+      {props: [prop('title', 'string')]},
+    );
+
+    const report = await compare([titled]);
+
+    expect(report.components).toBe(0);
+    expect(report.unchecked).toEqual([
+      expect.objectContaining({
+        component: 'Titled',
+        reason: expect.stringMatching(
+          /config has an error.*missing-base\.json/,
+        ),
+      }),
+    ]);
+  });
+
+  it('accepts a name through an index signature only as TypeScript would', async () => {
+    withTypeScript();
+    const keyed = component(
+      'Keyed',
+      [
+        'export interface KeyedProps {',
+        '  [key: `data-${string}`]: string | undefined;',
+        '  [key: `${string}:${string}`]: string;',
+        '  [key: `col${number}`]: number;',
+        '  [key: `on${Capitalize<string>}`]: () => void;',
+        '}',
+        'export function Keyed(props: KeyedProps) { return null; }',
+      ].join('\n'),
+      {
+        props: [
+          prop('data-section', 'string'),
+          prop('a:b', 'string'),
+          prop('col2', 'number'),
+          prop('onClick', '() => void'),
+          prop('elevation', 'string'),
+          prop('colSpan', 'string'),
+          prop('onclick', 'string'),
+        ],
+      },
+    );
+    const empty = component(
+      'Empty',
+      `interface EmptyProps { label?: string }
+export function Empty(props: EmptyProps | Record<string, never>) { return null; }`,
+      {props: [prop('label', 'string'), prop('elevation', 'number')]},
+    );
+    const typedAny = component(
+      'TypedAny',
+      'export function TypedAny(props: any) { return null; }\n',
+      {props: [prop('label', 'string')]},
+    );
+    const anyConst = component(
+      'AnyConst',
+      'export const AnyConst: any = null;\n',
+      {props: [prop('label', 'string')]},
+    );
+
+    const report = await compare([keyed, empty, typedAny, anyConst]);
+
+    expect(kinds(report)).toEqual([
+      'Empty.elevation not_in_code',
+      'Keyed.colSpan not_in_code',
+      'Keyed.elevation not_in_code',
+      'Keyed.onclick not_in_code',
+    ]);
+    expect(report.unchecked.map(u => [u.component, u.reason])).toEqual([
+      ['AnyConst', expect.stringContaining('typed `any`')],
+      ['TypedAny', expect.stringContaining('typed `any`')],
+    ]);
+  });
+
+  it("reads props through React's component types, lists the ones typed any or named by the element they render, and loads the ambient types tsconfig includes", async () => {
+    withTypeScript();
+    fs.mkdirSync(path.join(pkg, 'node_modules', '@types'), {recursive: true});
+    fs.symlinkSync(
+      path.dirname(require.resolve('@types/react/package.json')),
+      path.join(pkg, 'node_modules', '@types', 'react'),
+      'dir',
+    );
+    const tsconfig = path.join(pkg, 'tsconfig.json');
+    const config = JSON.parse(fs.readFileSync(tsconfig, 'utf8'));
+    fs.writeFileSync(
+      tsconfig,
+      JSON.stringify({...config, include: ['components', 'types']}),
+    );
+    fs.mkdirSync(path.join(pkg, 'types'));
+    fs.writeFileSync(
+      path.join(pkg, 'types', 'ambient.d.ts'),
+      'interface AmbientProps { label?: string }\n',
+    );
+    const source = `import {forwardRef, memo, type FC, type ComponentType, type ComponentPropsWithoutRef, type ElementType} from 'react';
+export function Poly<E extends ElementType = 'div'>(props: {as?: E; padding?: number} & Omit<ComponentPropsWithoutRef<E>, 'as' | 'padding'>) { return null; }
+export const Fc: FC<any> = () => null;
+export const Memo = memo((props: any) => null);
+export const Fwd = forwardRef<HTMLDivElement, any>((props, ref) => null);
+export const FwdOmit = forwardRef<HTMLDivElement, Omit<any, 'as'>>((props, ref) => null);
+export const FwdPartial = memo(forwardRef<HTMLDivElement, Partial<any>>((props, ref) => null));
+export function Ambient(props: AmbientProps) { return null; }
+export const Typed: ComponentType<{label?: string}> = () => null;
+const withName = <P,>(c: ComponentType<P>): ComponentType<P> => c;
+export const Hoc = withName((props: {label?: string}) => null);`;
+    const props = [prop('label', 'string'), prop('elevation', 'number')];
+
+    const report = await compare(
+      'Fc Memo Fwd FwdOmit FwdPartial Poly Ambient Typed Hoc'
+        .split(' ')
+        .map(name => component(name, source, {props})),
+    );
+
+    expect(kinds(report)).toEqual(
+      'Ambient Hoc Typed'
+        .split(' ')
+        .map(name => `${name}.elevation not_in_code`),
+    );
+    expect(report.unchecked.map(u => [u.component, u.reason])).toEqual(
+      ['Fc', 'Fwd', 'FwdOmit', 'FwdPartial', 'Memo', 'Poly'].map(name => [
+        name,
+        expect.stringContaining(
+          name === 'Poly' ? 'from a type parameter' : 'typed `any`',
+        ),
+      ]),
+    );
+  });
+
+  it('reads names that list several props, spreads, and fields through arrays, tuples, unions and index signatures', async () => {
+    withTypeScript();
+    const menu = component(
+      'Menu',
+      [
+        'export interface MenuProps {',
+        '  onOpen?: () => void;',
+        '  onClose?: () => void;',
+        '  value?: {label: string; items: ReadonlyArray<{id: string}>};',
+        '  labels?: Record<string, string>;',
+        '  slots?: {[key: `slot-${string}`]: string};',
+        "  rows?: Array<{kind: 'a'; total: string} | {kind: 'b'}>;",
+        '  grid?: Array<Array<{id: string}>>;',
+        '  pair?: readonly [{id: string}, {id: number}];',
+        '}',
+        'export function Menu(props: MenuProps) { return null; }',
+      ].join('\n'),
+      {
+        props: [
+          prop('onOpen / onClose', '() => void / () => void'),
+          prop('...rest', 'Omit<OtherProps, "x">'),
+          ...['value.label', 'value.items[].id', 'value.missing'].map(name =>
+            prop(name, 'string'),
+          ),
+          ...['labels.close', 'slots.slot-a', 'slots.other'].map(name =>
+            prop(name, 'string'),
+          ),
+          ...['rows[].total', 'grid[][].id', 'grid[][].size', 'pair[].id'].map(
+            name => prop(name, 'string'),
+          ),
+        ],
+      },
+    );
+
+    expect(kinds(await compare([menu]))).toEqual([
+      'Menu.grid[][].size not_in_code',
+      'Menu.slots.other not_in_code',
+      'Menu.value.missing not_in_code',
+    ]);
+  });
+
+  it('skips with a reason, and compares nothing, without a TypeScript it can use', async () => {
+    const badge = component(
+      'Badge',
+      'export function Badge(props: {label: string}) { return null; }\n',
+      {props: [prop('label', 'number')]},
+    );
+    const skipped = (/** @type {string} */ reason) => ({
+      status: 'skipped',
+      reason,
+      components: 0,
+      findings: [],
+      unchecked: [],
+    });
+
+    expect(await compare([badge])).toEqual(skipped(TYPESCRIPT_MISSING_REASON));
+    // TypeScript 7 has no JavaScript compiler API to load.
+    const dir = path.join(pkg, 'node_modules', 'typescript');
+    fs.mkdirSync(dir, {recursive: true});
+    fs.writeFileSync(
+      path.join(dir, 'package.json'),
+      JSON.stringify({
+        name: 'typescript',
+        version: '7.0.0',
+        exports: {'./package.json': './package.json'},
+      }),
+    );
+    expect(await compare([badge])).toEqual(
+      skipped(
+        unusableTypeScriptReason(
+          '7.0.0',
+          'documented props were not compared with the code',
+        ),
+      ),
+    );
   });
 });

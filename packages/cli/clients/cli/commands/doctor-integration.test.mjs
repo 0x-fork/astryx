@@ -21,6 +21,7 @@ import {discoverOwnedComponents} from '../../../foundation/discovery/component-d
 import {discoverBuiltinTopics} from '../../../foundation/discovery/docs-discovery.mjs';
 import {findCoreDir} from '../../../foundation/fs/paths.mjs';
 import {registerDoctor} from './doctor.mjs';
+import {expectRecordsCarry} from '../../../test-utils/text-projection.mjs';
 
 let tmpDir;
 let previousCwd;
@@ -366,6 +367,10 @@ describe('doctor integration — command', () => {
       const printed = logCalls.join('\n');
       expect(printed).toContain('core_not_found');
       expect(printed).not.toContain('[ok]');
+      // No TypeScript out here either: the props comparison says it skipped.
+      expect(printed).toContain(
+        '[skip] Props not compared: TypeScript is not installed in this project',
+      );
       expect(process.exitCode).toBe(1);
     } finally {
       tmpDir = previousTmp;
@@ -394,6 +399,328 @@ describe('doctor integration — command', () => {
     expect(output).toContain(core.name);
     expect(output).toContain(`component ${core.name} --package @acme/widgets`);
     expect(process.exitCode).toBeUndefined();
+  });
+
+  it('components prints each documented prop that differs from the code, and still exits 0', async () => {
+    writeComponentIntegration('AcmeBadge');
+    fs.writeFileSync(
+      path.join(tmpDir, 'components', 'AcmeBadge.doc.mjs'),
+      `export default {type: 'component', name: 'AcmeBadge', displayName: 'AcmeBadge', description: 'Fixture component.', props: [{name: 'label', type: 'string', description: 'Text.'}]};\n`,
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, 'components', 'AcmeBadge.tsx'),
+      'export function AcmeBadge(props: {label: string}) { return null; }\n',
+    );
+    process.chdir(tmpDir);
+
+    await createProgram().parseAsync([
+      'node',
+      'astryx',
+      'doctor',
+      'integration',
+      'components',
+    ]);
+
+    const output = logCalls.join('\n');
+    expect(output).toMatch(/^kind:\s+required_mismatch$/m);
+    expect(output).toContain(
+      '"label" is required in the code, but the doc does not mark it required.',
+    );
+    expect(output).toContain(
+      '1 prop(s) differ between the docs and the code in 1 of 1 component(s) compared (TypeScript',
+    );
+    expect(output).not.toContain('[ok] Documented prop');
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('components compares a hidden doc and a family entry with no record, so their drift is never an [ok]', async () => {
+    writeComponentIntegration('AcmeMenu');
+    const dir = path.join(tmpDir, 'components');
+    fs.writeFileSync(
+      path.join(dir, 'AcmeMenu.doc.mjs'),
+      `export default {type: 'component', name: 'AcmeMenuRoot', displayName: 'AcmeMenuRoot', description: 'Fixture component.', hiddenComponents: ['AcmeMenuItem'], components: [{name: 'AcmeMenuItem', displayName: 'AcmeMenuItem', description: 'Fixture item.', props: [{name: 'label', type: 'string', description: 'Text.'}]}]};\n`,
+    );
+    fs.writeFileSync(
+      path.join(dir, 'AcmeMenu.tsx'),
+      'export function AcmeMenuRoot() { return null; }\nexport function AcmeMenuItem(props: {value?: string}) { return null; }\n',
+    );
+    fs.writeFileSync(
+      path.join(dir, 'AcmeSecret.doc.mjs'),
+      `export default {type: 'component', name: 'AcmeSecret', displayName: 'AcmeSecret', description: 'Fixture component.', hidden: true, props: [{name: 'tone', type: 'string', description: 'Tone.'}]};\n`,
+    );
+    fs.writeFileSync(
+      path.join(dir, 'AcmeSecret.tsx'),
+      'export function AcmeSecret(props: {size?: number}) { return null; }\n',
+    );
+    process.chdir(tmpDir);
+    const run = async (/** @type {string[]} */ flags) => {
+      logCalls.length = 0;
+      await createProgram().parseAsync([
+        'node',
+        'astryx',
+        ...flags,
+        'doctor',
+        'integration',
+        'components',
+      ]);
+      return logCalls.join('\n');
+    };
+
+    const report = JSON.parse(await run(['--json'])).data.propDrift;
+    const output = await run([]);
+
+    expect(
+      report.findings.map(f => `${f.component}.${f.prop} ${f.kind}`),
+    ).toEqual([
+      'AcmeMenuItem.label not_in_code',
+      'AcmeMenuItem.value not_in_doc',
+      'AcmeSecret.size not_in_doc',
+      'AcmeSecret.tone not_in_code',
+    ]);
+    expect(output).not.toContain('[ok] Documented prop');
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('components lists props a mapped type builds from keys it cannot trace, and says the [ok] leaves them out', async () => {
+    writeComponentIntegration('AcmeChip');
+    const dir = path.join(tmpDir, 'components');
+    fs.writeFileSync(
+      path.join(dir, 'AcmeChip.doc.mjs'),
+      `export default {type: 'component', name: 'AcmeChip', displayName: 'AcmeChip', description: 'Fixture.', props: [{name: 'label', type: 'string', description: 'Text.'}]};\n`,
+    );
+    fs.writeFileSync(
+      path.join(dir, 'AcmeChip.tsx'),
+      "export function AcmeChip(props: {label?: string} & {[K in `on${Capitalize<'open'>}`]?: () => void}) { return null; }\n",
+    );
+    process.chdir(tmpDir);
+    const run = async (/** @type {string[]} */ flags) => {
+      logCalls.length = 0;
+      await createProgram().parseAsync([
+        'node',
+        'astryx',
+        ...flags,
+        'doctor',
+        'integration',
+        'components',
+      ]);
+      return logCalls.join('\n');
+    };
+
+    const {propsNotChecked} = JSON.parse(await run(['--json'])).data.propDrift;
+    const output = await run([]);
+
+    expect(propsNotChecked).toEqual([
+      expect.objectContaining({component: 'AcmeChip', props: ['onOpen']}),
+    ]);
+    expect(output).toContain(
+      '[info] Props not checked for a doc entry in 1 component(s):',
+    );
+    expect(output).toContain(
+      'in 1 component(s), apart from the props not checked (TypeScript',
+    );
+  });
+
+  it('components compares the entries of a family doc whose own source is missing', async () => {
+    writeComponentIntegration('AcmeTabs');
+    const dir = path.join(tmpDir, 'components');
+    const entry = (/** @type {string} */ name, /** @type {string} */ prop) =>
+      `{name: '${name}', displayName: '${name}', description: 'Fixture.', props: [{name: '${prop}', type: 'string', description: 'Text.'}]}`;
+    fs.writeFileSync(
+      path.join(dir, 'AcmeTabs.doc.mjs'),
+      `export default {type: 'component', name: 'AcmeTabs', displayName: 'AcmeTabs', description: 'Fixture.', props: [], hiddenComponents: ['AcmeTabsPanel'], components: [${entry('AcmeTabsItem', 'label')}, ${entry('AcmeTabsPanel', 'ghost')}]};\n`,
+    );
+    fs.rmSync(path.join(dir, 'AcmeTabs.tsx'), {force: true});
+    // The package's entry exports the members, so discovery records the
+    // listed one, though the family's own file is missing.
+    for (const name of ['AcmeTabsItem', 'AcmeTabsPanel']) {
+      fs.writeFileSync(
+        path.join(dir, `${name}.tsx`),
+        `export function ${name}(props: {label?: string; open?: boolean}) { return null; }\n`,
+      );
+      fs.appendFileSync(
+        path.join(tmpDir, 'index.ts'),
+        `export {${name}} from './components/${name}';\n`,
+      );
+    }
+    process.chdir(tmpDir);
+
+    await createProgram().parseAsync([
+      'node',
+      'astryx',
+      '--json',
+      'doctor',
+      'integration',
+      'components',
+    ]);
+    const report = JSON.parse(logCalls.join('\n')).data.propDrift;
+
+    expect(
+      report.findings.map(
+        (/** @type {any} */ f) => `${f.component}.${f.prop} ${f.kind}`,
+      ),
+    ).toEqual([
+      'AcmeTabsItem.open not_in_doc',
+      'AcmeTabsPanel.ghost not_in_code',
+      'AcmeTabsPanel.label not_in_doc',
+      'AcmeTabsPanel.open not_in_doc',
+    ]);
+    expect(report.unchecked).toEqual([
+      {
+        component: 'AcmeTabs',
+        doc: 'components/AcmeTabs.doc.mjs',
+        reason: 'no source file for AcmeTabs',
+      },
+    ]);
+  });
+
+  it('components counts two docs of one name as two components, and compares a .doc.ts beside a .doc.mjs', async () => {
+    writeComponentIntegration('AcmeTwin');
+    const dir = path.join(tmpDir, 'components');
+    const doc = (/** @type {string} */ name, /** @type {string} */ prop) =>
+      `export default {type: 'component', name: '${name}', displayName: '${name}', description: 'Fixture.', props: [{name: '${prop}', type: 'string', description: 'Text.'}]};\n`;
+    fs.writeFileSync(
+      path.join(dir, 'AcmeTwin.doc.mjs'),
+      doc('AcmeTwin', 'tone'),
+    );
+    fs.writeFileSync(
+      path.join(dir, 'AcmeTwin.doc.ts'),
+      doc('AcmeTwin', 'size'),
+    );
+    fs.writeFileSync(
+      path.join(dir, 'AcmeTwin.tsx'),
+      'export function AcmeTwin(props: {label?: string}) { return null; }\n',
+    );
+    for (const folder of ['a', 'b']) {
+      fs.mkdirSync(path.join(dir, folder));
+      fs.writeFileSync(
+        path.join(dir, folder, 'AcmeX.doc.mjs'),
+        doc('AcmeX', folder),
+      );
+      fs.writeFileSync(
+        path.join(dir, folder, 'AcmeX.tsx'),
+        'export function AcmeX() { return null; }\n',
+      );
+    }
+    process.chdir(tmpDir);
+    const run = async (/** @type {string[]} */ flags) => {
+      logCalls.length = 0;
+      await createProgram().parseAsync([
+        'node',
+        'astryx',
+        ...flags,
+        'doctor',
+        'integration',
+        'components',
+      ]);
+      return logCalls.join('\n');
+    };
+
+    const report = JSON.parse(await run(['--json'])).data.propDrift;
+    const output = await run([]);
+
+    expect(
+      report.findings
+        .filter(f => f.kind === 'not_in_code')
+        .map(f => `${f.doc} ${f.prop}`)
+        .sort(),
+    ).toEqual([
+      'components/AcmeTwin.doc.mjs tone',
+      'components/AcmeTwin.doc.ts size',
+      'components/a/AcmeX.doc.mjs a',
+      'components/b/AcmeX.doc.mjs b',
+    ]);
+    expect(output).toMatch(/ in 4 of 4 component\(s\) compared /);
+  });
+
+  it('components prints every field of the props comparison that JSON carries', async () => {
+    writeComponentIntegration('AcmeBadge');
+    fs.writeFileSync(
+      path.join(tmpDir, 'components', 'AcmeBadge.doc.mjs'),
+      `export default {type: 'component', name: 'AcmeBadge', displayName: 'AcmeBadge', description: 'Fixture component.', props: [${[
+        "{name: 'label', type: 'string', description: 'Text.'}",
+        "{name: 'elevation', type: 'number', description: 'Shadow.'}",
+      ].join(', ')}]};\n`,
+    );
+    // `key` is a prop a doc never needs, though the component declares it.
+    fs.writeFileSync(
+      path.join(tmpDir, 'components', 'AcmeBadge.tsx'),
+      "export function AcmeBadge(props: {label: string; tone?: 'neutral' | 'info'; key?: string}) { return null; }\n",
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, 'components', 'AcmeLonely.doc.mjs'),
+      `export default {type: 'component', name: 'AcmeLonely', displayName: 'AcmeLonely', description: 'Fixture component.', props: []};\n`,
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, 'components', 'AcmeLonely.tsx'),
+      'export function Other() { return null; }\n',
+    );
+    process.chdir(tmpDir);
+    const run = async (/** @type {string[]} */ flags) => {
+      logCalls.length = 0;
+      await createProgram().parseAsync([
+        'node',
+        'astryx',
+        ...flags,
+        'doctor',
+        'integration',
+        'components',
+      ]);
+      return logCalls.join('\n');
+    };
+
+    const report = JSON.parse(await run(['--json'])).data.propDrift;
+    const output = await run([]);
+
+    expect(report.findings.map(f => `${f.prop} ${f.kind}`)).toEqual([
+      'elevation not_in_code',
+      'label required_mismatch',
+      'tone not_in_doc',
+    ]);
+    expectRecordsCarry(output, report.findings, ['component', 'prop', 'kind']);
+    expectRecordsCarry(output, report.unchecked, ['component', 'reason']);
+    expect(output).toContain(
+      `in 1 of ${report.components} component(s) compared (TypeScript ${report.typescript}).`,
+    );
+  });
+
+  it('components says documented props match when they do', async () => {
+    writeComponentIntegration('AcmeOnlyWidget');
+    process.chdir(tmpDir);
+
+    await createProgram().parseAsync([
+      'node',
+      'astryx',
+      'doctor',
+      'integration',
+      'components',
+    ]);
+
+    expect(logCalls.join('\n')).toMatch(
+      /\[ok\] Documented prop names and required flags match the code in 1 component\(s\) \(TypeScript \d/,
+    );
+  });
+
+  it('components prints no [ok] for props it could not compare', async () => {
+    writeComponentIntegration('AcmeLonely');
+    fs.writeFileSync(
+      path.join(tmpDir, 'components', 'AcmeLonely.tsx'),
+      'export function Other() { return null; }\n',
+    );
+    process.chdir(tmpDir);
+
+    await createProgram().parseAsync([
+      'node',
+      'astryx',
+      'doctor',
+      'integration',
+      'components',
+    ]);
+
+    const output = logCalls.join('\n');
+    expect(output).toContain(
+      '[info] Props not compared for 1 documented component(s):',
+    );
+    expect(output).not.toContain('[ok] Documented prop');
   });
 
   it('components exposes conflicts as structured JSON warnings', async () => {
