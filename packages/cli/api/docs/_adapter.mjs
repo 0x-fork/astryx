@@ -17,8 +17,11 @@
  *   foundation/discovery/docs-discovery, which the catalog comes from.
  */
 
+import * as path from 'node:path';
 import {Project} from '../../foundation/config/project.mjs';
 import {DocsCatalog} from '../../foundation/discovery/docs-discovery.mjs';
+import {checkDocTypes} from '../../foundation/discovery/doc-types.mjs';
+import {integrationDocFiles} from '../../foundation/discovery/integration-doc-files.mjs';
 import {
   linkReferenceTopic,
   lowerReferenceTopic,
@@ -1330,4 +1333,38 @@ export async function resolveTopicDocs(topic, options = {}) {
   const {catalog, entry} = found;
   const node = await lowerTopic(catalog, entry, effectiveLang);
   return {catalog, node, lang: effectiveLang, entry};
+}
+
+/**
+ * Each doc one integration package ships, checked against the published
+ * authoring type for its kind with the project's own TypeScript (spec:AST-039
+ * FR13). Without TypeScript the report says nothing was checked.
+ * @param {any} integration a loaded integration
+ * @param {string} cwd
+ * @returns {Promise<import('../../foundation/discovery/doc-types.mjs').DocTypesReport & {fixtures?: number}>}
+ */
+export async function integrationDocTypes(integration, cwd) {
+  const packageDir = /** @type {{__packageDir?: string}} */ (integration)
+    .__packageDir;
+  const {files, unread, fixtures} = await integrationDocFiles(integration);
+  const checked = await checkDocTypes(files, {
+    packageDir: packageDir ?? cwd,
+    resolveFrom: [cwd, packageDir],
+  });
+  // Test fixtures no reader serves don't ship as docs: only counted.
+  const report =
+    checked.status === 'checked' && fixtures > 0
+      ? {...checked, fixtures}
+      : checked;
+  if (report.status !== 'checked' || unread.length === 0) return report;
+  // A root its reader cannot read serves no doc; say so rather than skip it.
+  const rel = (/** @type {string} */ file) =>
+    path.relative(packageDir ?? cwd, file).split(path.sep).join('/') || '.';
+  return {
+    ...report,
+    unchecked: [
+      ...report.unchecked,
+      ...unread.map(entry => ({doc: rel(entry.path), reason: entry.reason})),
+    ].sort((a, b) => a.doc.localeCompare(b.doc)),
+  };
 }

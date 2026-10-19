@@ -99,6 +99,85 @@ function issueBlocks(issues) {
 }
 
 /**
+ * The docs checked against the authoring types: a visible line when it was
+ * skipped, the findings (all warnings), the files it could not check, or an
+ * [ok] (never after a failed check).
+ * @param {import('../../../api/integration/validate-integration.type.mjs').DocTypesReport | undefined} report
+ * @param {boolean} failed
+ */
+function docTypesBlocks(report, failed) {
+  if (!report) return [];
+  if (
+    report.status === 'checked' &&
+    report.docs === 0 &&
+    report.findings.length === 0 &&
+    report.unchecked.length === 0
+  ) {
+    return [
+      text('[info] No doc files to type-check.'),
+      ...(report.fixtures
+        ? [text(`[info] ${report.fixtures} test fixture doc(s) not checked.`)]
+        : []),
+    ];
+  }
+  if (report.status === 'skipped') {
+    return [text(`[skip] Docs not type-checked: ${report.reason}`)];
+  }
+  const blocks = [
+    section(
+      `Checking ${report.docs} doc(s) against the authoring types${report.typescript ? ` (TypeScript ${report.typescript})` : ''}`,
+    ),
+  ];
+  if (report.findings.length > 0) {
+    const files = new Set(report.findings.map(f => f.doc)).size;
+    blocks.push(
+      records(report.findings, {
+        fields: [
+          'severity',
+          'doc',
+          'line',
+          'export',
+          'type',
+          'field',
+          'problem',
+          'message',
+          'fix',
+        ],
+        format: {severity: statusToken},
+      }),
+      text(
+        `${report.findings.length} doc field(s) in ${files} file(s) do not match the authoring types. ` +
+          'These are warnings; `astryx docs authoring` lists every field.',
+      ),
+    );
+  }
+  if (report.unchecked.length > 0) {
+    blocks.push(
+      text(`[info] Not type-checked: ${report.unchecked.length} doc file(s):`),
+      records(report.unchecked, {fields: ['doc', 'reason']}),
+    );
+  }
+  if (report.fixtures) {
+    blocks.push(
+      text(`[info] ${report.fixtures} test fixture doc(s) not checked.`),
+    );
+  }
+  if (report.findings.length === 0 && report.docs > 0) {
+    // After a failed check an [ok] reads as a pass, but the result still shows.
+    blocks.push(
+      text(
+        failed
+          ? `[info] No doc field differs from its authoring type (${report.docs} checked).`
+          : report.unchecked.length > 0
+            ? `[ok] Every doc that was checked matches its authoring type (${report.docs} checked).`
+            : `[ok] Every doc matches its authoring type (${report.docs} checked).`,
+      ),
+    );
+  }
+  return blocks;
+}
+
+/**
  * @param {import('../../../api/integration/validate-integration.type.mjs').ValidateIntegrationResponse['data']} data
  */
 function printIntegrationValidation(data) {
@@ -119,6 +198,7 @@ function printIntegrationValidation(data) {
       `Summary: ${errors} error${errors === 1 ? '' : 's'}, ` +
         `${warnings} warning${warnings === 1 ? '' : 's'}`,
     ),
+    ...docTypesBlocks(data.docTypes, errors > 0),
   );
 }
 

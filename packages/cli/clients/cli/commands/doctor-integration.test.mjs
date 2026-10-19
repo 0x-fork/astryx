@@ -210,6 +210,425 @@ describe('doctor integration — command', () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  it('validate warns about each doc field that does not match its authoring type, and still exits 0', async () => {
+    writeIntegration({id: 'hero', name: 'Hero', type: 'block'});
+    process.chdir(tmpDir);
+
+    await createProgram().parseAsync([
+      'node',
+      'astryx',
+      'doctor',
+      'integration',
+      'validate',
+    ]);
+
+    const output = logCalls.join('\n');
+    expect(output).toContain('[ok] No integration issues found.');
+    expect(output).toMatch(
+      /Checking 1 doc\(s\) against the authoring types \(TypeScript \d+\.\d+/,
+    );
+    expect(output).toContain('templates/hero.doc.mjs');
+    expect(output).toMatch(/export:\s+default/);
+    expect(output).toMatch(/type:\s+IntegrationTemplateDoc/);
+    expect(output).toContain(
+      'Add `aspectRatio`: IntegrationBlockTemplateDoc requires it.',
+    );
+    expect(output).toContain(
+      'Add `displayName`: IntegrationBlockTemplateDoc requires it.',
+    );
+    expect(output).toContain(
+      '2 doc field(s) in 1 file(s) do not match the authoring types.',
+    );
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('validate says there is no doc to type-check, rather than asking for TypeScript', async () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'astryx-no-docs-'));
+    try {
+      fs.writeFileSync(
+        path.join(outside, 'package.json'),
+        JSON.stringify({name: '@acme/widgets', version: '1.2.3'}),
+      );
+      fs.writeFileSync(
+        path.join(outside, 'astryx.integration.mjs'),
+        "export default {components: './components'};\n",
+      );
+      fs.mkdirSync(path.join(outside, 'components'));
+      fs.writeFileSync(
+        path.join(outside, 'components', 'Widget.tsx'),
+        'export function Widget() { return null; }\n',
+      );
+      process.chdir(outside);
+
+      await createProgram().parseAsync([
+        'node',
+        'astryx',
+        'doctor',
+        'integration',
+        'validate',
+      ]);
+
+      const output = logCalls.join('\n');
+      expect(output).toContain('[info] No doc files to type-check.');
+      expect(output).not.toContain('Docs not type-checked');
+      expect(output).not.toContain('against the authoring types');
+    } finally {
+      process.chdir(previousCwd);
+      fs.rmSync(outside, {recursive: true, force: true});
+    }
+  });
+
+  it('validate says the docs matched even when another check failed', async () => {
+    writeIntegration({id: 'hero', missingRoot: true});
+    fs.writeFileSync(
+      path.join(tmpDir, 'astryx.integration.mjs'),
+      "export default {templates: './missing', components: './components'};\n",
+    );
+    fs.mkdirSync(path.join(tmpDir, 'components'), {recursive: true});
+    fs.writeFileSync(
+      path.join(tmpDir, 'components', 'AcmeBadge.doc.mjs'),
+      "export default {type: 'component', name: 'AcmeBadge', displayName: 'Badge', usage: {description: 'A badge.'}, props: []};\n",
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, 'components', 'AcmeBadge.tsx'),
+      'export function AcmeBadge() { return null; }\n',
+    );
+    process.chdir(tmpDir);
+
+    await createProgram().parseAsync([
+      'node',
+      'astryx',
+      'doctor',
+      'integration',
+      'validate',
+    ]);
+
+    const output = logCalls.join('\n');
+    expect(process.exitCode).toBe(1);
+    expect(output).toContain(
+      '[info] No doc field differs from its authoring type (1 checked).',
+    );
+    expect(output).not.toContain('[ok] Every doc');
+  });
+
+  it('validate prints every field of the doc type check that JSON carries', async () => {
+    writeIntegration({id: 'hero', name: 'Hero', type: 'block'});
+    fs.writeFileSync(
+      path.join(tmpDir, 'astryx.integration.mjs'),
+      "export default {templates: './templates', components: './components'};\n",
+    );
+    fs.mkdirSync(path.join(tmpDir, 'components'), {recursive: true});
+    fs.writeFileSync(
+      path.join(tmpDir, 'components', 'AcmeBadge.doc.mjs'),
+      "export default {type: 'component', name: 'AcmeBadge', displayName: 5, usage: {description: 'A badge.'}, props: [], keyword: ['x']};\n",
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, 'components', 'AcmeBadge.tsx'),
+      'export function AcmeBadge() { return null; }\n',
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, 'components', 'shared.mjs'),
+      `export default {type: 'component', name: 'AcmeAgain', displayName: 'Again', usage: {description: 'x'}, props: []};\n`,
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, 'components', 'AcmeAgain.doc.mjs'),
+      "export {default} from './shared.mjs';\n",
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, 'components', 'AcmeAgain.tsx'),
+      'export function AcmeAgain() { return null; }\n',
+    );
+    process.chdir(tmpDir);
+    const run = async (/** @type {string[]} */ flags) => {
+      logCalls.length = 0;
+      await createProgram().parseAsync([
+        'node',
+        'astryx',
+        ...flags,
+        'doctor',
+        'integration',
+        'validate',
+      ]);
+      return logCalls.join('\n');
+    };
+
+    const report = JSON.parse(await run(['--json'])).data.docTypes;
+    const output = await run([]);
+
+    expect([...new Set(report.findings.map(f => f.problem))].sort()).toEqual([
+      'missing_field',
+      'unknown_field',
+      'wrong_type',
+    ]);
+    expect(report.unchecked).toHaveLength(1);
+    expectRecordsCarry(output, report.findings, ['doc', 'field', 'problem']);
+    expectRecordsCarry(output, report.unchecked, ['doc', 'reason']);
+    expect(output).toContain(
+      `Checking ${report.docs} doc(s) against the authoring types (TypeScript ${report.typescript})`,
+    );
+  });
+
+  it('validate type-checks each doc component discovery serves, in __fixtures__, in a dot-folder or behind a symlink', async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'package.json'),
+      JSON.stringify({name: '@acme/widgets', version: '1.2.3'}),
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, 'astryx.integration.mjs'),
+      `export default {components: './components'};\n`,
+    );
+    for (const [rel, name] of [
+      ['components/__fixtures__/AcmeFixture.doc.mjs', 'AcmeFixture'],
+      ['components/.drafts/AcmeDraft.doc.mjs', 'AcmeDraft'],
+      ['shared/AcmeLinked.doc.mjs', 'AcmeLinked'],
+    ]) {
+      fs.mkdirSync(path.dirname(path.join(tmpDir, rel)), {recursive: true});
+      fs.writeFileSync(
+        path.join(tmpDir, rel),
+        `export default {type: 'component', name: '${name}', displayName: '${name}', usage: {description: 'Fixture.'}, props: [], keyword: []};\n`,
+      );
+    }
+    fs.symlinkSync(
+      path.join(tmpDir, 'shared', 'AcmeLinked.doc.mjs'),
+      path.join(tmpDir, 'components', 'AcmeLinked.doc.mjs'),
+    );
+    process.chdir(tmpDir);
+
+    await createProgram().parseAsync([
+      'node',
+      'astryx',
+      '--json',
+      'doctor',
+      'integration',
+      'validate',
+    ]);
+
+    const {docTypes} = JSON.parse(logCalls.join('\n')).data;
+    expect(docTypes).toMatchObject({status: 'checked', docs: 3, unchecked: []});
+    expect(
+      docTypes.findings.map(
+        (/** @type {any} */ f) => `${f.doc} ${f.field} ${f.problem}`,
+      ),
+    ).toEqual([
+      'components/__fixtures__/AcmeFixture.doc.mjs keyword unknown_field',
+      'components/.drafts/AcmeDraft.doc.mjs keyword unknown_field',
+      'components/AcmeLinked.doc.mjs keyword unknown_field',
+    ]);
+  });
+
+  it('validate type-checks a hidden doc and a second doc for one name, and counts a test fixture', async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'package.json'),
+      JSON.stringify({name: '@acme/widgets', version: '1.2.3'}),
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, 'astryx.integration.mjs'),
+      `export default {components: './components'};\n`,
+    );
+    for (const [rel, name, extra] of [
+      ['components/AcmeBadge.doc.mjs', 'AcmeBadge', ''],
+      ['components/again/AcmeBadge.doc.mjs', 'AcmeBadge', ', keyword: []'],
+      [
+        'components/AcmeHidden.doc.mjs',
+        'AcmeHidden',
+        ', hidden: true, keyword: []',
+      ],
+      [
+        'components/__tests__/AcmeTested.doc.mjs',
+        'AcmeTested',
+        ', keyword: []',
+      ],
+    ]) {
+      fs.mkdirSync(path.dirname(path.join(tmpDir, rel)), {recursive: true});
+      fs.writeFileSync(
+        path.join(tmpDir, rel),
+        `export default {type: 'component', name: '${name}', displayName: '${name}', usage: {description: 'Fixture.'}, props: []${extra}};\n`,
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, rel.replace('.doc.mjs', '.tsx')),
+        'export default function Fixture() { return null; }\n',
+      );
+    }
+    process.chdir(tmpDir);
+    const run = async (/** @type {string[]} */ flags) => {
+      logCalls.length = 0;
+      await createProgram().parseAsync([
+        'node',
+        'astryx',
+        ...flags,
+        'doctor',
+        'integration',
+        'validate',
+      ]);
+      return logCalls.join('\n');
+    };
+
+    const {docTypes} = JSON.parse(await run(['--json'])).data;
+    const output = await run([]);
+
+    expect(docTypes).toMatchObject({docs: 3, fixtures: 1, unchecked: []});
+    expect(
+      docTypes.findings.map(
+        (/** @type {any} */ f) => `${f.doc} ${f.field} ${f.problem}`,
+      ),
+    ).toEqual([
+      'components/AcmeHidden.doc.mjs keyword unknown_field',
+      'components/again/AcmeBadge.doc.mjs keyword unknown_field',
+    ]);
+    expect(output).toContain('[info] 1 test fixture doc(s) not checked.');
+    expect(output).not.toContain('[ok] Every doc matches');
+  });
+
+  it('validate keeps the fixture count when test fixtures are the only docs', async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'package.json'),
+      JSON.stringify({name: '@acme/widgets', version: '1.2.3'}),
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, 'astryx.integration.mjs'),
+      `export default {components: './components'};\n`,
+    );
+    const rel = 'components/__tests__/AcmeTested.doc.mjs';
+    fs.mkdirSync(path.dirname(path.join(tmpDir, rel)), {recursive: true});
+    fs.writeFileSync(
+      path.join(tmpDir, rel),
+      `export default {type: 'component', name: 'AcmeTested', displayName: 'AcmeTested', usage: {description: 'Fixture.'}, props: []};\n`,
+    );
+    process.chdir(tmpDir);
+    const run = async (/** @type {string[]} */ flags) => {
+      logCalls.length = 0;
+      await createProgram().parseAsync([
+        'node',
+        'astryx',
+        ...flags,
+        'doctor',
+        'integration',
+        'validate',
+      ]);
+      return logCalls.join('\n');
+    };
+
+    const {docTypes} = JSON.parse(await run(['--json'])).data;
+    const output = await run([]);
+
+    expect(docTypes).toMatchObject({docs: 0, fixtures: 1, findings: []});
+    expect(output).toContain('[info] No doc files to type-check.');
+    expect(output).toContain('[info] 1 test fixture doc(s) not checked.');
+  });
+
+  it("validate keeps main's issue for a root it cannot read, and lists a root with a folder it cannot read", async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'package.json'),
+      JSON.stringify({name: '@acme/widgets', version: '1.2.3'}),
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, 'astryx.integration.mjs'),
+      `export default {components: './components', docs: './docs'};\n`,
+    );
+    fs.mkdirSync(path.join(tmpDir, 'components', 'locked'), {recursive: true});
+    fs.mkdirSync(path.join(tmpDir, 'docs'));
+    const locked = [
+      path.join(tmpDir, 'components', 'locked'),
+      path.join(tmpDir, 'docs'),
+    ];
+    for (const dir of locked) fs.chmodSync(dir, 0o000);
+    process.chdir(tmpDir);
+    try {
+      await createProgram().parseAsync([
+        'node',
+        'astryx',
+        '--json',
+        'doctor',
+        'integration',
+        'validate',
+      ]);
+    } finally {
+      for (const dir of locked) fs.chmodSync(dir, 0o755);
+    }
+
+    const {data} = JSON.parse(logCalls.join('\n'));
+    expect(data.issues.map((/** @type {any} */ i) => i.code).sort()).toEqual([
+      'invalid_component',
+      'unreadable_root',
+    ]);
+    expect(data.docTypes.unchecked).toEqual([
+      {
+        doc: 'components',
+        reason: expect.stringMatching(
+          /^the components root does not load, so no doc in it was checked: .*EACCES/,
+        ),
+      },
+    ]);
+  });
+
+  it('validate reports the doc type check as additive JSON', async () => {
+    writeIntegration({id: 'hero', name: 'Hero', type: 'block'});
+    process.chdir(tmpDir);
+
+    await createProgram().parseAsync([
+      'node',
+      'astryx',
+      '--json',
+      'doctor',
+      'integration',
+      'validate',
+    ]);
+
+    const parsed = JSON.parse(logCalls.join('\n'));
+    expect(parsed.data.issues).toEqual([]);
+    expect(parsed.data.docTypes).toMatchObject({
+      status: 'checked',
+      docs: 1,
+      unchecked: [],
+    });
+    expect(parsed.data.docTypes.typescript).toMatch(/^\d+\.\d+/);
+    expect(parsed.data.docTypes.findings).toEqual([
+      expect.objectContaining({
+        doc: 'templates/hero.doc.mjs',
+        export: 'default',
+        type: 'IntegrationTemplateDoc',
+        field: 'aspectRatio',
+        problem: 'missing_field',
+        severity: 'warning',
+      }),
+      expect.objectContaining({field: 'displayName', problem: 'missing_field'}),
+    ]);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('validate says, in one visible line, that docs were not type-checked when the project has no TypeScript', async () => {
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'astryx-no-ts-'));
+    const inside = tmpDir;
+    try {
+      // The fixture helpers write to tmpDir; point it outside the repository,
+      // where no TypeScript resolves, and restore it for afterEach.
+      tmpDir = outside;
+      writeIntegration({id: 'hero', name: 'Hero', type: 'block'});
+      tmpDir = inside;
+      process.chdir(outside);
+
+      await createProgram().parseAsync([
+        'node',
+        'astryx',
+        'doctor',
+        'integration',
+        'validate',
+      ]);
+
+      const output = logCalls.join('\n');
+      expect(output).toContain(
+        '[skip] Docs not type-checked: TypeScript is not installed in this project',
+      );
+      expect(output).not.toMatch(
+        /Checking \d+ doc\(s\) against the authoring types/,
+      );
+      expect(process.exitCode).toBeUndefined();
+    } finally {
+      process.chdir(previousCwd);
+      fs.rmSync(outside, {recursive: true, force: true});
+    }
+  });
+
   it('templates warns on a Core id and writes the exact --package command', async () => {
     const [core] = await discoverCoreTemplates();
     expect(core).toBeDefined();
