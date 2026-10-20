@@ -29,7 +29,7 @@ import {
   discoverOwnedComponents,
 } from '../../foundation/discovery/component-discovery.mjs';
 import {loadComponentReplacements} from '../component/_adapter.mjs';
-import {integrationPropDrift} from './_adapter.mjs';
+import {integrationCopiedPassages, integrationPropDrift} from './_adapter.mjs';
 import {
   discoverBuiltinTopics,
   discoverIntegrationDocs,
@@ -323,10 +323,12 @@ export async function integrationDocConflicts(pkg, options = {}) {
   const version = resolved.found ? (resolved.version ?? null) : null;
   const issues = [...resolved.issues];
 
+  /** @type {import('./authoring-checks.type.mjs').CopiedPassage[]} */
+  const copiedPassages = [];
   if (!resolved.integration?.docs || name == null) {
     return {
       type: 'integration.doc-conflicts',
-      data: {validated, name, version, findings: [], issues},
+      data: {validated, name, version, findings: [], copiedPassages, issues},
     };
   }
 
@@ -416,10 +418,19 @@ export async function integrationDocConflicts(pkg, options = {}) {
     )) {
       issues.push({code: 'invalid_doc_reference', severity: 'error', message});
     }
+
+    // One fact has one owner: a passage two topics repeat goes stale in one
+    // of them. Each is listed and is a warning (architecture:cli-surface
+    // DEC-8), so `integration check --strict` fails until it is fixed;
+    // `doctor integration docs` keeps its exit code, as it fails on errors.
+    copiedPassages.push(...(await integrationCopiedPassages(discovered)));
+    for (const {message} of copiedPassages) {
+      issues.push({code: 'copied_passage', severity: 'warning', message});
+    }
   }
 
   return {
     type: 'integration.doc-conflicts',
-    data: {validated, name, version, findings, issues},
+    data: {validated, name, version, findings, copiedPassages, issues},
   };
 }
