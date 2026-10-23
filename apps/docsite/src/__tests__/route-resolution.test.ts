@@ -102,6 +102,8 @@ describe('route resolution', () => {
         'authoring',
         'browser-support',
         'cli-component-lookups',
+        'cli-experimental-icon-set-files',
+        'cli-experimental-icon-sets',
         'cli-host-entry',
         'global',
         'internationalization',
