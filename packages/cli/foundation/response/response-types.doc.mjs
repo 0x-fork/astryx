@@ -112,6 +112,19 @@ export const doc = {
       description:
         "One post's metadata plus the feed URL and the post's full plaintext body.",
     },
+    // render (experimental: may change or be removed in a patch release)
+    {
+      value: 'render.page',
+      stability: 'experimental',
+      description:
+        'A page rendered to one self-contained file: `input`, `output`, `bytes`, the local files embedded (`files`: modules, stylesheets, images and JSON), the package `stylesheets` cut and inlined, `classes`, `cssBytes`, `images` inlined, and `warnings` (`{code, message}`; empty when nothing looked wrong). Experimental: may change or be removed in a patch release.',
+    },
+    {
+      value: 'render.reverse',
+      stability: 'experimental',
+      description:
+        'A rendered file turned back into a page: `input`, `mode` (`embedded`: the embedded source written back byte for byte; `rebuilt`: rebuilt from Astryx markup, text and layout only), `output`, every file written (`files`), `exact`, the relative imports it did not carry (`missing`, when any), and for a rebuilt page `components`, `elements`, `unknown` and `omitted`. Experimental: may change or be removed in a patch release.',
+    },
 
     // experimental icon (installed icon sets, AST-084): experimental values,
     // documented under `astryx docs cli/experimental`, not in this table.
