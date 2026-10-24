@@ -1409,6 +1409,25 @@ jobs:
           EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_HEAD_SHA"
 
+      # A contract step added on main after this PR branched names a spec file
+      # the PR head does not have, and would fail with "No tests found". The
+      # wrapper, sourced into every later step, drops such files from
+      # `pnpm exec playwright test` with a notice and passes a step left with
+      # none. It comes from the merge commit these steps come from (an older PR
+      # head lacks it, and the PR's recorded base can lag main).
+      - name: Skip contract specs the PR head predates
+        if: github.event_name == 'pull_request'
+        env:
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          wrapper="$RUNNER_TEMP/skip-absent-specs.sh"
+          if git fetch --quiet --no-tags --depth=1 origin "$WORKFLOW_SHA" \
+            && git show "$WORKFLOW_SHA:.github/scripts/skip-absent-specs.sh" > "$wrapper"; then
+            echo "BASH_ENV=$wrapper" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Could not load the spec wrapper from the merge commit; contract steps run unwrapped."
+          fi
+
       # Dependencies are installed later, together with the Playwright browser,
       # because the analysis artifact has to be downloaded first.
       - name: Setup Node and pnpm
@@ -2653,7 +2672,13 @@ jobs:
           COMPONENTS=$(node .github/scripts/a11y-pr-scope.mjs analysis.json)
           case ",${COMPONENTS}," in
             *,core/Markdown,*)
-              echo 'should_run=true' >> "$GITHUB_OUTPUT"
+              # An older PR head can lack the spec (the wrapper then skips
+              # it), and it would leave nothing for the upload to find.
+              if [ -e packages/core/src/Markdown/plugins/headingLinks.a11y.chromium.spec.ts ]; then
+                echo 'should_run=true' >> "$GITHUB_OUTPUT"
+              else
+                echo 'should_run=false' >> "$GITHUB_OUTPUT"
+              fi
               pnpm exec playwright test \
                 packages/core/src/Markdown/plugins/headingLinks.a11y.chromium.spec.ts \
                 --project chromium \
