@@ -124,7 +124,9 @@ const bridge = connectBridge(core, {
 ## Working on it
 
 ```sh
+pnpm -F @astryxdesign/native typecheck        # source and tests
 pnpm -F @astryxdesign/native build            # dist/, including platform types
+pnpm -F @astryxdesign/native typecheck:types  # every platform's types, after build
 pnpm -F @astryxdesign/native generate:apple   # regenerate apple/Sources/.../Generated
 pnpm vitest run --project node packages/native
 ```
