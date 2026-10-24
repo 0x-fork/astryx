@@ -201,5 +201,15 @@ export const doc = {
         '`Command:` line in its header, such as `// Command: pnpm run gen:panel`; upgrade prints it as ' +
         '`Regenerate with: <command>` and lists it in `commands`.',
     },
+    {type: 'heading', level: 3, text: 'A failed codemod'},
+    {
+      type: 'prose',
+      text:
+        'When a codemod or a `hooks.postCodemod` command fails, upgrade still makes every other change, exits 1 with ERR_CODEMOD_FAILED, and does not refresh the agent docs. ' +
+        'With --json, the result is the usual error, `{"error": ..., "code": "ERR_CODEMOD_FAILED"}`, plus a `receipt`: the same fields a finished run returns, with `complete: false`, ' +
+        'each failure in `errors`, and every file upgrade changed (or would change) in `modifiedFiles`, so a script can review, keep, or revert them. ' +
+        'An error that stops the run after codemods have written files, such as an astryx.config that fails validation, carries a `receipt` too. ' +
+        'Rerun past a failed codemod with --skip-codemod.',
+    },
   ],
 };
