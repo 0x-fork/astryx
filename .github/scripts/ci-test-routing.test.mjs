@@ -71,7 +71,7 @@ const WORKFLOWS = {
     // other and so ride one lane of their own.
     lanes: ['test-ui', 'test-node', 'typecheck'],
     scopeConditional: false,
-    sharded: false,
+    sharded: true,
   },
 };
 
@@ -157,18 +157,6 @@ describe.each(Object.entries(WORKFLOWS))(
         expect(suite['continue-on-error']).not.toBe(true);
       }
 
-      if (!sharded) {
-        // One conditional step preserves the existing scope gate for both
-        // runs. Exact foreground commands also reject backgrounding or
-        // ignored exits.
-        expect(suites).toHaveLength(1);
-        expect(suites[0].run.trim().split('\n')).toEqual([
-          'pnpm test:ui',
-          'pnpm test:ui:isolated',
-        ]);
-        return;
-      }
-
       // Sharded: every leg runs its share without FR23, and exactly one leg
       // runs FR23 in a later step on the same runner, after its share exited.
       expect(suites).toHaveLength(2);
@@ -178,12 +166,18 @@ describe.each(Object.entries(WORKFLOWS))(
       expect(job.steps.indexOf(isolated)).toBeGreaterThan(
         job.steps.indexOf(share),
       );
-      expect(isolated.if).toBe(`matrix.shard == 1 && ${share.if}`);
+      expect(isolated.if).toBe(
+        share.if ? `matrix.shard == 1 && ${share.if}` : 'matrix.shard == 1',
+      );
     });
 
     if (sharded) {
       it('splits each Vitest lane across legs that together run every file', () => {
-        for (const lane of lanes) {
+        const vitestLanes = lanes.filter(lane =>
+          /--project \w+/.test(runLines(workflow.jobs[lane])),
+        );
+        expect(vitestLanes).toEqual(['test-ui', 'test-node']);
+        for (const lane of vitestLanes) {
           const job = workflow.jobs[lane];
           const legs = job.strategy?.matrix?.shard;
           expect(Array.isArray(legs), `${lane} has no shard matrix`).toBe(true);
@@ -647,13 +641,23 @@ describe('deploy.yml push gating', () => {
     }
   });
 
-  it('checks out main on every push-gate lane', () => {
-    // A lane that checks out the default ref would gate the wrong commit.
+  it('checks out one run-wide main commit on every push-gate lane and leg', () => {
+    // A lane that checks out the default ref would gate the wrong commit, and
+    // legs that each resolve `main` can straddle a merge and shard different
+    // file lists, so one job resolves the commit and every leg checks it out.
+    const resolve = workflow.jobs['main-commit'];
+    expect(resolve.outputs.sha).toBe('${{ steps.resolve.outputs.sha }}');
+    const script = resolve.steps[0].with.script;
+    expect(script).toContain('context.sha');
+    expect(script).toContain("branch: 'main'");
     for (const lane of ['test-ui', 'test-node', 'typecheck']) {
+      expect(workflow.jobs[lane].needs).toEqual(['main-commit']);
       const checkout = workflow.jobs[lane].steps.find(step =>
         step.uses?.startsWith('actions/checkout'),
       );
-      expect(checkout?.with?.ref, `${lane} does not pin main`).toBe('main');
+      expect(checkout?.with?.ref, `${lane} does not pin the run's commit`).toBe(
+        '${{ needs.main-commit.outputs.sha }}',
+      );
     }
   });
 });
