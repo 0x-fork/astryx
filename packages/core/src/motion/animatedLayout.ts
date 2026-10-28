@@ -234,10 +234,85 @@ const ours = new WeakSet<Animation>();
 
 const TRANSFORM_PROPERTIES = ['transform', 'translate', 'rotate', 'scale'];
 
+/** The numbers in a CSS value, units dropped. */
+function numbersIn(value: string): number[] {
+  return (value.match(/-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?/gi) ?? []).map(
+    Number,
+  );
+}
+
 /**
- * Whether the app moves `element` itself: its own `transform`, `translate`,
- * `rotate` or `scale`, or a running animation of one this module did not
- * start.
+ * Whether a transform value leaves the element where it is: nothing at all
+ * (a swipe's `translate3d(0, 0, 0)` at rest, a button's `scale(1)`, computed
+ * as `matrix(1, 0, 0, 1, 0, 0)`), or a scale in place (a pressed button's
+ * `scale(0.98)`). A glide's `translate` composes with either; a translation,
+ * rotation or skew of its own is the app moving the element.
+ */
+function staysInPlace(property: string, value: string): boolean {
+  if (value === 'none') {
+    // No transform at all (a keyframe a press's own transition starts from).
+    return true;
+  }
+  if (property === 'scale') {
+    return true;
+  }
+  if (value.includes('var(')) {
+    // An unresolved custom property in an app's own keyframes: its value is
+    // unknown here, so the app moves the element.
+    return false;
+  }
+  if (property === 'translate') {
+    return numbersIn(value).every(n => n === 0);
+  }
+  if (property === 'rotate') {
+    // An angle, after an optional axis: only the angle matters.
+    const numbers = numbersIn(value);
+    return numbers.length > 0 && numbers[numbers.length - 1] === 0;
+  }
+  // A list of transform functions, as computed (`matrix()`, `matrix3d()`)
+  // or as written.
+  const functions = [...value.matchAll(/([a-z0-9]+)\(([^)]*)\)/gi)];
+  return (
+    functions.length > 0 &&
+    functions.every(([, name, args]) => {
+      const numbers = numbersIn(args);
+      const fn = name.toLowerCase();
+      if (fn === 'matrix') {
+        // a b c d e f: no skew, rotation or translation.
+        return (
+          numbers.length === 6 &&
+          [1, 2, 4, 5].every(index => numbers[index] === 0)
+        );
+      }
+      if (fn === 'matrix3d') {
+        // Only the diagonal: a scale, nothing else.
+        return (
+          numbers.length === 16 &&
+          numbers.every((n, index) => index % 5 === 0 || n === 0)
+        );
+      }
+      if (fn === 'rotate3d') {
+        return numbers[3] === 0;
+      }
+      if (fn.startsWith('scale')) {
+        return true;
+      }
+      if (
+        fn.startsWith('translate') ||
+        fn.startsWith('rotate') ||
+        fn.startsWith('skew')
+      ) {
+        return numbers.every(n => n === 0);
+      }
+      return false;
+    })
+  );
+}
+
+/**
+ * Whether the app moves `element` itself: its own `transform`, `translate`
+ * or `rotate`, or a running animation of one this module did not start. A
+ * value that leaves it in place (nothing, or a scale) is not a move.
  */
 function movedByApp(element: Element): boolean {
   const style = element.ownerDocument.defaultView?.getComputedStyle(element);
@@ -245,7 +320,7 @@ function movedByApp(element: Element): boolean {
     style != null &&
     TRANSFORM_PROPERTIES.some(property => {
       const value = style.getPropertyValue(property);
-      return value !== '' && value !== 'none';
+      return value !== '' && value !== 'none' && !staysInPlace(property, value);
     })
   ) {
     return true;
@@ -263,7 +338,13 @@ function movedByApp(element: Element): boolean {
     }
     return effect
       .getKeyframes()
-      .some(frame => TRANSFORM_PROPERTIES.some(property => property in frame));
+      .some(frame =>
+        TRANSFORM_PROPERTIES.some(
+          property =>
+            property in frame &&
+            !staysInPlace(property, String(frame[property])),
+        ),
+      );
   });
 }
 
@@ -702,13 +783,19 @@ function visibleRect(area: Element): DOMRect {
 }
 
 /** The element's rendered scale against its layout size (a scaled ancestor). */
-function scaleOf(element: Element, rect: DOMRect): {x: number; y: number} {
+function scaleOf(
+  element: Element,
+  rect: DOMRect,
+  own: {readonly x: number; readonly y: number} = {x: 1, y: 1},
+): {x: number; y: number} {
   const html = element as HTMLElement;
   const x =
-    html.offsetWidth > 0 && rect.width > 0 ? rect.width / html.offsetWidth : 1;
+    html.offsetWidth > 0 && rect.width > 0
+      ? rect.width / html.offsetWidth / own.x
+      : 1;
   const y =
     html.offsetHeight > 0 && rect.height > 0
-      ? rect.height / html.offsetHeight
+      ? rect.height / html.offsetHeight / own.y
       : 1;
   // Subpixel rounding makes an unscaled element read a hair off 1; only a
   // real scale is corrected.
@@ -716,6 +803,42 @@ function scaleOf(element: Element, rect: DOMRect): {x: number; y: number} {
     x: Math.abs(x - 1) < 0.01 ? 1 : x || 1,
     y: Math.abs(y - 1) < 0.01 ? 1 : y || 1,
   };
+}
+
+/**
+ * The scale an element's own `scale` and `transform` give it, on each axis
+ * (a follower that keeps one in place, `staysInPlace`). A glide's `translate`
+ * does not go through them: the individual transform properties apply
+ * `translate` first, in the parent's space.
+ */
+function ownScaleOf(element: Element): {x: number; y: number} {
+  const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+  if (style == null) {
+    return {x: 1, y: 1};
+  }
+  let x = 1;
+  let y = 1;
+  const scale = style.getPropertyValue('scale');
+  if (scale !== '' && scale !== 'none') {
+    const [sx = 1, sy = sx] = numbersIn(scale);
+    // Its size, not its direction: a negative scale flips the element in
+    // place, and its measured box stays positive.
+    x *= Math.abs(sx);
+    y *= Math.abs(sy);
+  }
+  // The computed transform is a matrix: its first column's length is the
+  // scale on x, its second's on y.
+  const matrix = /^matrix(3d)?\(([^)]*)\)/.exec(
+    style.getPropertyValue('transform'),
+  );
+  if (matrix != null) {
+    const m = numbersIn(matrix[2]);
+    const [a = 1, b = 0, c = 0, d = 1] =
+      matrix[1] == null ? m : [m[0], m[1], m[4], m[5]];
+    x *= Math.hypot(a, b);
+    y *= Math.hypot(c, d);
+  }
+  return {x: x || 1, y: y || 1};
 }
 
 function flush(batch: Batch): void {
@@ -819,7 +942,9 @@ function flush(batch: Batch): void {
     const after = entry.after as DOMRect;
     if (intersects(entry.before, visible) || intersects(after, visible)) {
       entry.isMovedByApp = movedByApp(entry.element);
-      entry.scale = scaleOf(entry.element, after);
+      // Only its ancestors' scale is corrected: its own scale or transform
+      // (a press's scale) does not apply to the glide's `translate`.
+      entry.scale = scaleOf(entry.element, after, ownScaleOf(entry.element));
     }
   }
   for (const entry of entries) {
